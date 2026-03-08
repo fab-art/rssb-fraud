@@ -940,6 +940,127 @@ def apply_name_normalisation(df: pd.DataFrame, col: str,
 
 
 
+
+
+def _build_rssb_logo_bytes() -> bytes:
+    """
+    Render the RSSB logo faithful to the official brand:
+    - Navy outer ring with 'RWANDA SOCIAL' (top arc) / 'SECURITY BOARD' (bottom arc)
+    - Gold sunburst ring
+    - RSSB Blue (#005BAA) shield with 'RSSB' in white
+    - 'Our Health / Our Future' tagline in navy
+    Returns PNG bytes. Falls back gracefully if Pillow is unavailable.
+    """
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+        import math as _math
+
+        RSSB_BLUE  = (0, 91, 170)
+        NAVY_DARK  = (12, 22, 78)
+        GOLD_RING  = (225, 178, 50)
+        WHITE_C    = (255, 255, 255)
+        DARK_TEXT  = (14, 24, 80)
+
+        SCALE = 5
+        FW, FH = 580, 160
+        img = Image.new("RGBA", (FW * SCALE, FH * SCALE), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(img)
+
+        CX = int(78 * SCALE); CY = int(80 * SCALE)
+        R_OUT  = int(72 * SCALE); R_GO = int(61 * SCALE)
+        R_GI   = int(50 * SCALE)
+        SHW    = int(84 * SCALE); SHH = int(90 * SCALE)
+
+        draw.ellipse([CX-R_OUT, CY-R_OUT, CX+R_OUT, CY+R_OUT], fill=NAVY_DARK)
+        draw.ellipse([CX-R_GO,  CY-R_GO,  CX+R_GO,  CY+R_GO ], fill=GOLD_RING)
+        draw.ellipse([CX-R_GI,  CY-R_GI,  CX+R_GI,  CY+R_GI ], fill=NAVY_DARK)
+
+        for i in range(14):
+            a = _math.radians(-165 + i * (330 / 13))
+            r1, r2 = R_GI + int(2*SCALE), R_GO - int(2*SCALE)
+            draw.line([CX + int(r1*_math.cos(a)), CY + int(r1*_math.sin(a)),
+                       CX + int(r2*_math.cos(a)), CY + int(r2*_math.sin(a))],
+                      fill=(190, 140, 15), width=int(1.2*SCALE))
+        draw.ellipse([CX-R_GI, CY-R_GI, CX+R_GI, CY+R_GI], fill=NAVY_DARK)
+
+        def _shield(cx, cy, w, h, c):
+            r = int(w * 0.16); pts = []
+            for a in range(180, 271, 4):
+                pts.append((cx-w//2+r+int(r*_math.cos(_math.radians(a))),
+                             cy-h//2+r+int(r*_math.sin(_math.radians(a)))))
+            for a in range(270, 361, 4):
+                pts.append((cx+w//2-r+int(r*_math.cos(_math.radians(a))),
+                             cy-h//2+r+int(r*_math.sin(_math.radians(a)))))
+            pts += [(cx+w//2, cy+h//4), (cx, cy+h//2), (cx-w//2, cy+h//4)]
+            draw.polygon(pts, fill=c)
+        _shield(CX, CY, SHW, SHH, RSSB_BLUE)
+
+        try:
+            f_rssb = ImageFont.truetype(
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", int(26*SCALE))
+            f_ring = ImageFont.truetype(
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", int(7*SCALE))
+            f_tag  = ImageFont.truetype(
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", int(17*SCALE))
+        except Exception:
+            f_rssb = f_ring = f_tag = ImageFont.load_default()
+
+        bb = draw.textbbox((0,0), "RSSB", font=f_rssb)
+        tw, th = bb[2]-bb[0], bb[3]-bb[1]
+        draw.text((CX-tw//2, CY-th//2-int(2*SCALE)), "RSSB", fill=WHITE_C, font=f_rssb)
+
+        def _cw(ch):
+            b = draw.textbbox((0,0), ch, font=f_ring); return b[2]-b[0]
+
+        def _arc_top(text, cx, cy, radius, center_deg, spacing=1.10):
+            arcs = [_math.degrees(_cw(c)*spacing/radius) for c in text]
+            angle = center_deg - sum(arcs)/2
+            for ch, arc in zip(text, arcs):
+                mid = angle + arc/2
+                rad = _math.radians(mid)
+                x = cx + radius*_math.cos(rad); y = cy + radius*_math.sin(rad)
+                b = draw.textbbox((0,0), ch, font=f_ring)
+                ci = Image.new("RGBA", (b[2]-b[0]+6, b[3]-b[1]+6), (0,0,0,0))
+                ImageDraw.Draw(ci).text((3,3), ch, font=f_ring, fill=WHITE_C)
+                rot = ci.rotate(-(mid+90), expand=True, resample=Image.BICUBIC)
+                img.paste(rot, (int(x-rot.width/2), int(y-rot.height/2)), rot)
+                angle += arc
+
+        def _arc_bottom(text, cx, cy, radius, center_deg, spacing=1.10):
+            arcs = [_math.degrees(_cw(c)*spacing/radius) for c in text]
+            angle = center_deg + sum(arcs)/2
+            for ch, arc in zip(text, arcs):
+                mid = angle - arc/2
+                rad = _math.radians(mid)
+                x = cx + radius*_math.cos(rad); y = cy + radius*_math.sin(rad)
+                b = draw.textbbox((0,0), ch, font=f_ring)
+                ci = Image.new("RGBA", (b[2]-b[0]+6, b[3]-b[1]+6), (0,0,0,0))
+                ImageDraw.Draw(ci).text((3,3), ch, font=f_ring, fill=WHITE_C)
+                rot = ci.rotate(-(mid-90), expand=True, resample=Image.BICUBIC)
+                img.paste(rot, (int(x-rot.width/2), int(y-rot.height/2)), rot)
+                angle -= arc
+
+        TEXT_R = int(55.5*SCALE)
+        _arc_top(   "RWANDA SOCIAL",  CX, CY, TEXT_R, -90)
+        _arc_bottom("SECURITY BOARD", CX, CY, TEXT_R,  90)
+
+        TX = int(168*SCALE); TY = CY - int(26*SCALE)
+        draw.line([TX-int(14*SCALE), CY-int(35*SCALE), TX-int(14*SCALE), CY+int(35*SCALE)],
+                  fill=(160, 165, 200), width=int(1.5*SCALE))
+        bb1 = draw.textbbox((0,0), "Our Health", font=f_tag)
+        lh  = bb1[3]-bb1[1]
+        draw.text((TX, TY),                    "Our Health", fill=DARK_TEXT, font=f_tag)
+        draw.text((TX, TY+lh+int(8*SCALE)),    "Our Future", fill=DARK_TEXT, font=f_tag)
+
+        final = img.resize((FW, FH), Image.LANCZOS)
+        buf = io.BytesIO()
+        final.save(buf, "PNG", optimize=True)
+        buf.seek(0)
+        return buf.read()
+    except Exception:
+        return b""
+
+
 def generate_counter_verification_xlsx(
     df: pd.DataFrame,
     deductions: list[dict],
@@ -954,361 +1075,441 @@ def generate_counter_verification_xlsx(
     dif_col: str | None = None,
 ) -> bytes:
     """
-    Generate counter-verification report matching the exact official format.
-    No colours — plain Calibri/Aptos Narrow, thin borders, matching column widths.
+    Generate RSSB-branded counter-verification Excel report.
+    Colours: #005BAA (RSSB Blue), #00A651 (Green), #F4B400 (Gold), #333333 (text)
 
-    Sheet 1 — 'After counter verification'
-    Sheet 2 — 'Counter verification report'
+    Sheet 1 — 'Counter Verification Report'   (summary + deduction schedule)
+    Sheet 2 — 'After Counter Verification'    (full 1,800+ row listing)
     """
-    import io as _io
     from openpyxl import Workbook
-    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-    from openpyxl.utils import get_column_letter
+    from openpyxl.drawing.image import Image as _XLImage
+    from openpyxl.styles import (Font as _Font, PatternFill as _PFill,
+        Alignment as _Align, Border as _Border, Side as _Side)
+    from openpyxl.utils import get_column_letter as _gcl
+    import io as _io
+    from datetime import datetime as _dt
 
-    wb = Workbook()
+    # ── Official brand palette ────────────────────────────────────────────────
+    _NAVY       = "005BAA"   # RSSB Blue — primary
+    _NAVY_DK    = "003D7A"   # darker navy for text contrast
+    _GREEN      = "00A651"   # RSSB Green — approvals / positive
+    _GOLD       = "F4B400"   # RSSB Gold — accent
+    _GOLD_DK    = "C9920A"   # darker gold for borders
+    _WHITE      = "FFFFFF"
+    _GRAY_LT    = "F2F2F2"   # table background (from brand guide)
+    _GRAY_MID   = "D6DCE4"
+    _GRAY_TEXT  = "333333"   # official dark gray body text
+    _RED        = "C00000"
+    _RED_BG     = "FCE4D6"
+    _AMBER_BG   = "FFF2CC"
+    _GREEN_BG   = "E8F5EE"
+    _BLUE_LT    = "EBF3FB"   # light tint of RSSB Blue
 
-    # ── Shared style helpers ──────────────────────────────────────────────────
-    THIN = Side(border_style="thin",   color="000000")
-    MED  = Side(border_style="medium", color="000000")
+    # ── Style micro-helpers ───────────────────────────────────────────────────
+    def _fill(h): return _PFill("solid", fgColor=h)
+    def _font(bold=False, color="333333", size=10, italic=False, name="Calibri"):
+        return _Font(bold=bold, color=color, size=size, italic=italic, name=name)
+    def _border(style="thin", color="D6DCE4"):
+        s = _Side(border_style=style, color=color)
+        return _Border(left=s, right=s, top=s, bottom=s)
+    def _align(h="left", v="center", wrap=False):
+        return _Align(horizontal=h, vertical=v, wrap_text=wrap)
+    _C  = _align("center"); _L = _align("left"); _R = _align("right")
+    _CW = _align("center", wrap=True); _LW = _align("left", wrap=True)
 
-    def thin_all():
-        return Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
+    def _hdr(ws, addr, text, bg=None, fc=_WHITE, sz=10):
+        c = ws[addr]
+        c.value = text; c.fill = _fill(bg or _NAVY)
+        c.font = _font(True, fc, sz); c.alignment = _CW
+        c.border = _border("thin", _GOLD_DK)
+        return c
 
-    def med_left():
-        return Border(left=MED)
+    def _meta_row(ws, rn, label, value):
+        ws.row_dimensions[rn].height = 20
+        ws.merge_cells(f"A{rn}:B{rn}")
+        lc = ws[f"A{rn}"]
+        lc.value = label; lc.font = _font(True, _NAVY_DK, 10)
+        lc.fill = _fill(_GRAY_LT); lc.alignment = _L
+        lc.border = _border("thin", _GRAY_MID)
+        ws.merge_cells(f"C{rn}:H{rn}")
+        vc = ws[f"C{rn}"]
+        vc.value = value; vc.font = _font(False, _GRAY_TEXT, 10)
+        vc.fill = _fill(_BLUE_LT); vc.alignment = _L
+        vc.border = _border("thin", _GRAY_MID)
 
-    FONT_HDR  = Font(name="Calibri",      bold=True,  size=11)
-    FONT_DATA = Font(name="Aptos Narrow", bold=False, size=11)
-    FONT_S2_TITLE = Font(name="Aptos Narrow", bold=True,  size=16)
-    FONT_S2_LABEL = Font(name="Aptos Narrow", bold=True,  size=16)
-    FONT_S2_VAL   = Font(name="Aptos Narrow", bold=False, size=16)
-    FONT_S2_TBLHDR= Font(name="Aptos Narrow", bold=True,  size=14)
-    FONT_S2_TBLDAT= Font(name="Aptos Narrow", bold=False, size=11)
-    FONT_S2_TOT   = Font(name="Aptos Narrow", bold=False, size=14)
-    FONT_SIG_BOLD = Font(name="Arial",        bold=True,  size=14)
-    FONT_SIG_NORM = Font(name="Arial",        bold=False, size=14)
+    generated_at = _dt.now().strftime("%d/%m/%Y %H:%M")
+    logo_bytes   = _build_rssb_logo_bytes()
 
-    CENTER = Alignment(horizontal="center", vertical="center", wrap_text=True)
-    LEFT   = Alignment(horizontal="left",   vertical="top",    wrap_text=True)
-    TOP    = Alignment(horizontal="left",   vertical="top",    wrap_text=True)
+    wb = Workbook(); wb.remove(wb.active)
 
-    def _safe_float(v):
-        if v is None:
-            return 0.0
-        try:
-            if pd.isna(v):
-                return 0.0
-        except Exception:
-            pass
-        try:
-            return float(str(v).replace(",", "").replace(" ", ""))
-        except ValueError:
-            return 0.0
+    # ════════════════════════════════════════════════════════════════════════════
+    # SHEET 1 — Counter Verification Report
+    # ════════════════════════════════════════════════════════════════════════════
+    ws2 = wb.create_sheet("Counter Verification Report")
+    ws2.sheet_view.showGridLines = False
+    ws2.page_setup.orientation  = "portrait"
+    ws2.page_setup.paperSize    = 9
+    ws2.print_options.horizontalCentered = True
 
-    def _safe_date(v):
-        if v is None:
-            return None
-        try:
-            if pd.isna(v):
-                return None
-        except Exception:
-            pass
-        return v
+    for col, w in {"A":3,"B":26,"C":26,"D":22,"E":16,"F":16,"G":16,"H":4}.items():
+        ws2.column_dimensions[col].width = w
 
-    # Build deduction lookup: paper_code → dict
-    ded_map = {str(d["paper_code"]).strip(): d for d in deductions}
+    # Row 1 — Logo
+    ws2.row_dimensions[1].height = 72
+    ws2.merge_cells("A1:H1")
+    ws2["A1"].fill = _fill(_WHITE)
+    if logo_bytes:
+        _li = _XLImage(_io.BytesIO(logo_bytes))
+        _li.width = 232; _li.height = 64
+        ws2.add_image(_li, "A1")
+    else:
+        ws2["A1"].value = "RSSB — Rwanda Social Security Board"
+        ws2["A1"].font  = _font(True, _NAVY_DK, 16)
+        ws2["A1"].alignment = _C
 
-    # ═════════════════════════════════════════════════════════════════════════
-    # SHEET 1 — "After counter verification"
-    # ═════════════════════════════════════════════════════════════════════════
-    ws1 = wb.active
-    ws1.title = "After counter verification"
+    # Row 2 — Gold accent bar
+    ws2.row_dimensions[2].height = 5
+    for col in "ABCDEFGH":
+        ws2[f"{col}2"].fill = _fill(_GOLD)
 
-    # Column widths from format file (A-N)
-    col_widths_s1 = [
-        13.54,  # A  Paper Code
-        17.91,  # B  Dispensing Date
-        22.54,  # C  Patient Name
-        24.82,  # D  RAMA Number
-        28.36,  # E  Practitioner Name
-        18.18,  # F  Health facility
-        19.73,  # G  Date of treatment
-        13.63,  # H  verified
-        23.45,  # I  TOTAL before counter v
-        35.82,  # J  85% after counter v
-        23.36,  # K  After counter ver 100%
-        20.82,  # L  After counter ver 85%
-        19.73,  # M  Amount deducted
-        19.73,  # N  Explinations (extra col, reasonable width)
-    ]
-    for ci, w in enumerate(col_widths_s1, 1):
-        ws1.column_dimensions[get_column_letter(ci)].width = w
+    # Row 3 — Title banner
+    ws2.row_dimensions[3].height = 34
+    ws2.merge_cells("A3:H3")
+    c = ws2["A3"]
+    c.value = "REPORT OF COUNTER VERIFICATION — PHARMACY"
+    c.fill = _fill(_NAVY); c.font = _font(True, _WHITE, 14)
+    c.alignment = _CW;     c.border = _border("thin", _GOLD_DK)
 
-    # Header row (row 1) — bold Calibri 11, thin border all sides
-    headers_s1 = [
-        "Paper Code", "Dispensing Date", "Patient Name", "RAMA Number",
-        "Practitioner Name", "Health facility", "Date of treatment", "verified",
-        "TOTAL before counter v", "85% after counter  v",
-        "After counter ver 100%", "After counter ver 85%",
-        "Amount deducted", "Explinations",
-    ]
-    for ci, h in enumerate(headers_s1, 1):
-        c = ws1.cell(row=1, column=ci, value=h)
-        c.font      = FONT_HDR
-        c.border    = thin_all()
-        c.alignment = Alignment(horizontal="center", vertical="center",
-                                wrap_text=True)
+    # Row 4 — Subtitle
+    ws2.row_dimensions[4].height = 18
+    ws2.merge_cells("A4:H4")
+    c = ws2["A4"]
+    c.value = (f"Rwanda Social Security Board  ·  Our Health, Our Future  ·  "
+               f"Generated: {generated_at}  ·  www.rssb.rw")
+    c.fill = _fill(_BLUE_LT); c.font = _font(False, _NAVY_DK, 9, italic=True)
+    c.alignment = _C
 
-    ws1.row_dimensions[1].height = 30
-    ws1.freeze_panes = "A2"
+    # Row 5 — spacer
+    ws2.row_dimensions[5].height = 6
 
-    # Data rows
-    def _get_col(row_, *keys, default=""):
-        """Try explicit col name, then fallbacks."""
-        for k in keys:
-            if k and k in row_.index:
-                v = row_[k]
-                try:
-                    if pd.notna(v):
-                        return v
-                except Exception:
-                    if v is not None:
-                        return v
-        return default
+    # Rows 6–10 — Metadata
+    _meta_row(ws2, 6,  "PROVINCE:",               meta.get("province",""))
+    _meta_row(ws2, 7,  "ADMINISTRATIVE DISTRICT:", meta.get("district",""))
+    _meta_row(ws2, 8,  "PHARMACY:",                meta.get("pharmacy",""))
+    _meta_row(ws2, 9,  "PERIOD:",                  meta.get("period",""))
+    _meta_row(ws2, 10, "CODE:",                    meta.get("code",""))
 
-    data_count = 0
-    for _, row in df.iterrows():
-        ri = data_count + 2  # row index (1-based, row 1 is header)
+    # Row 11 — spacer
+    ws2.row_dimensions[11].height = 8
 
-        # Paper code
-        if pc_col and pc_col in row.index:
-            pc = str(row[pc_col]).strip()
-        else:
-            pc = str(_get_col(row, "voucher_id", "paper_code", "Paper Code", default=""))
+    # Row 12 — Section header: Deduction Schedule
+    ws2.row_dimensions[12].height = 22
+    ws2.merge_cells("A12:H12")
+    c = ws2["A12"]
+    c.value = "DEDUCTION SCHEDULE"; c.fill = _fill(_NAVY_DK)
+    c.font = _font(True, _WHITE, 11); c.alignment = _C
 
-        # Amounts
-        total  = _safe_float(_get_col(row, tot_col, "Total Cost", "total_cost", "amount"))
-        ins_co = _safe_float(_get_col(row, ins_col, "Insurance Co-payment",
-                                      "insurance_copay", "insurance_co_payment"))
+    # Row 13 — Table headers
+    ws2.row_dimensions[13].height = 40
+    for (start, end, text) in [
+        ("A13","A13","No."),
+        ("B13","B13","ID Invoice\n(Paper Code)"),
+        ("C13","C13","Beneficiary's\nRAMA No."),
+        ("D13","D13","Patient Name"),
+        ("E13","F13","Amount Deducted\n(RWF)"),
+        ("G13","H13","Explanation of Deduction"),
+    ]:
+        if start != end: ws2.merge_cells(f"{start}:{end}")
+        _hdr(ws2, start, text)
 
-        ded = ded_map.get(pc)
-        is_ded     = ded is not None
-        ded_amount = _safe_float(ded["amount"])      if is_ded else 0.0
-        expla      = str(ded["explanation"]).strip()  if is_ded else ""
-        verified   = "NO" if is_ded else "YES"
+    # Deduction data rows
+    FIRST_DED = 14
+    for i, ded in enumerate(deductions):
+        rn = FIRST_DED + i
+        bg = _WHITE if i % 2 == 0 else _GRAY_LT
+        ws2.row_dimensions[rn].height = 18
 
-        # Computed columns
-        total_85        = round(ins_co * 0.85, 2)           # J: 85% of ins co-pay before counter-v
-        after_100       = round(ins_co - ded_amount, 2)     # K: after counter ver 100%
-        after_85        = round(after_100 * 0.85, 2)        # L: after counter ver 85%
+        for addr, val, aln, fnt in [
+            (f"A{rn}", i+1,                            _C,  _font(True, _NAVY_DK, 10)),
+            (f"B{rn}", str(ded.get("voucher_id","")),  _C,  _font(False, _GRAY_TEXT, 10, name="Courier New")),
+            (f"C{rn}", str(ded.get("rama","")),         _C,  _font(False, _GRAY_TEXT, 10, name="Courier New")),
+            (f"D{rn}", str(ded.get("patient_name","")), _LW, _font(False, _GRAY_TEXT, 10)),
+        ]:
+            c = ws2[addr]; c.value = val; c.alignment = aln
+            c.font = fnt; c.fill = _fill(bg); c.border = _border("thin", _GRAY_MID)
 
-        # Build row values
-        row_vals = [
-            pc,
-            _safe_date(_get_col(row, "Dispensing Date", "dispensing_date", "visit_date")),
-            str(_get_col(row, "Patient Name", "patient_name", default="")),
-            str(_get_col(row, "RAMA Number", "rama_number", "patient_id", default="")),
-            str(_get_col(row, "Practitioner Name", "practitioner_name", "doctor_name", default="")),
-            str(_get_col(row, "Health Facility", "Health facility", "facility",
-                         default="PHARMACIE VINCA GISENYI LTD")),
-            _safe_date(_get_col(row, "Dispensing Date", "dispensing_date", "visit_date")),
-            verified,
-            ins_co,       # I: TOTAL before counter v  (= insurance co-payment)
-            total_85,     # J: 85% after counter v
-            after_100,    # K: After counter ver 100%
-            after_85,     # L: After counter ver 85%
-            ded_amount,   # M: Amount deducted
-            expla,        # N: Explanations
-        ]
+        ws2.merge_cells(f"E{rn}:F{rn}")
+        c = ws2[f"E{rn}"]
+        c.value = float(ded.get("difference",0) or 0)
+        c.alignment = _R; c.fill = _fill(_RED_BG)
+        c.font = _font(True, _RED, 10); c.border = _border("thin", _GRAY_MID)
+        c.number_format = "#,##0"
 
-        for ci, val in enumerate(row_vals, 1):
-            c = ws1.cell(row=ri, column=ci, value=val)
-            c.font   = FONT_DATA
-            c.border = thin_all()
-            if ci in (2, 7):
-                c.number_format = "DD/MM/YYYY"
-                c.alignment = Alignment(horizontal="center", vertical="center")
-            elif ci in (9, 10, 11, 12, 13):
-                c.number_format = "#,##0.00"
-                c.alignment = Alignment(horizontal="right", vertical="center")
+        ws2.merge_cells(f"G{rn}:H{rn}")
+        c = ws2[f"G{rn}"]
+        c.value = str(ded.get("observation","")); c.alignment = _LW
+        c.font = _font(False, _GRAY_TEXT, 10); c.fill = _fill(bg)
+        c.border = _border("thin", _GRAY_MID)
+
+    # Total row
+    total_row = FIRST_DED + len(deductions)
+    last_ded  = total_row - 1
+    ws2.row_dimensions[total_row].height = 28
+
+    ws2.merge_cells(f"A{total_row}:D{total_row}")
+    c = ws2[f"A{total_row}"]
+    c.value = "TOTAL AMOUNT DEDUCTED (RWF)"; c.fill = _fill(_NAVY)
+    c.font = _font(True, _WHITE, 11); c.alignment = _align("right")
+    c.border = _border("thin", _GOLD_DK)
+
+    ws2.merge_cells(f"E{total_row}:F{total_row}")
+    c = ws2[f"E{total_row}"]
+    c.value = f"=SUM(E{FIRST_DED}:E{last_ded})"
+    c.fill = _fill(_GOLD); c.font = _font(True, _NAVY_DK, 13)
+    c.alignment = _R; c.border = _border("medium", _GOLD_DK)
+    c.number_format = "#,##0"
+
+    ws2.merge_cells(f"G{total_row}:H{total_row}")
+    ws2[f"G{total_row}"].fill   = _fill(_NAVY)
+    ws2[f"G{total_row}"].border = _border("thin", _GOLD_DK)
+
+    # ── Summary stats ──────────────────────────────────────────────────────────
+    stat_row = total_row + 2
+    ws2.row_dimensions[total_row+1].height = 10
+    ws2.row_dimensions[stat_row].height    = 22
+    ws2.merge_cells(f"A{stat_row}:H{stat_row}")
+    c = ws2[f"A{stat_row}"]
+    c.value = "VERIFICATION SUMMARY"; c.fill = _fill(_NAVY)
+    c.font = _font(True, _WHITE, 10); c.alignment = _C
+
+    _total_rows  = len(df) if df is not None else 0
+    _total_amt   = float(df[tot_col].sum()) if (df is not None and tot_col and tot_col in df.columns) else 0
+    _total_ded   = sum(float(d.get("difference",0) or 0) for d in deductions)
+    _ins_sum     = float(df[ins_col].sum()) if (df is not None and ins_col and ins_col in df.columns) else 0
+    _net_85      = _ins_sum - _total_ded if _ins_sum else 0
+
+    for si, (lbl, val, icon) in enumerate([
+        ("Total Vouchers Reviewed",      str(_total_rows),             "📋"),
+        ("Total Deductions Applied",     str(len(deductions)),          "⚠"),
+        ("Gross Claims (100%)",          f"RWF {_total_amt:,.0f}",    "💰"),
+        ("Total Amount Deducted",        f"RWF {_total_ded:,.0f}",    "➖"),
+        ("Net Payable 85% (RSSB share)", f"RWF {_net_85:,.0f}",       "✅"),
+    ]):
+        rn = stat_row + 1 + si
+        ws2.row_dimensions[rn].height = 20
+        ws2.merge_cells(f"A{rn}:C{rn}")
+        lc = ws2[f"A{rn}"]
+        lc.value = f"{icon}  {lbl}"; lc.font = _font(True, _NAVY_DK, 10)
+        lc.fill = _fill(_GRAY_LT); lc.alignment = _L; lc.border = _border("thin", _GRAY_MID)
+        ws2.merge_cells(f"D{rn}:H{rn}")
+        vc = ws2[f"D{rn}"]
+        bg_v = _GREEN_BG if si == 4 else (_RED_BG if si == 3 else _BLUE_LT)
+        col_v = _GREEN   if si == 4 else (_RED    if si == 3 else _NAVY_DK)
+        vc.value = val; vc.font = _font(True, col_v, 10)
+        vc.fill = _fill(bg_v); vc.alignment = _R; vc.border = _border("thin", _GRAY_MID)
+
+    # ── Signature block ────────────────────────────────────────────────────────
+    sig_row = stat_row + 8
+    ws2.row_dimensions[sig_row - 1].height = 14
+
+    for (sc, ec, title, name_val) in [
+        ("B","C","Prepared by", prepared_by),
+        ("D","E","Verified by", verified_by),
+        ("F","G","Approved by", approved_by),
+    ]:
+        ws2.row_dimensions[sig_row].height = 20
+        ws2.merge_cells(f"{sc}{sig_row}:{ec}{sig_row}")
+        c = ws2[f"{sc}{sig_row}"]
+        c.value = title; c.fill = _fill(_NAVY); c.font = _font(True, _WHITE, 10)
+        c.alignment = _C; c.border = _border("thin", _GOLD_DK)
+
+    for offset, lbl in enumerate(["Date:", "Signature:", "Names:"]):
+        rn = sig_row + 1 + offset
+        ws2.row_dimensions[rn].height = 22
+        for sc, ec, nv in [("B","C",prepared_by),("D","E",verified_by),("F","G",approved_by)]:
+            ws2.merge_cells(f"{sc}{rn}:{ec}{rn}")
+            c = ws2[f"{sc}{rn}"]
+            c.value = f"Names: {nv}" if lbl == "Names:" else lbl
+            c.font  = _font(False, _GRAY_TEXT, 10)
+            if lbl == "Signature:":
+                c.fill = _fill(_WHITE)
+                c.border = _Border(
+                    bottom=_Side(border_style="medium", color=_NAVY),
+                    left=_Side(border_style="thin", color=_GRAY_MID),
+                    right=_Side(border_style="thin", color=_GRAY_MID),
+                    top=_Side(border_style="thin", color=_GRAY_MID),
+                )
             else:
-                c.alignment = Alignment(horizontal="left", vertical="center",
-                                        wrap_text=(ci == 14))
+                c.fill = _fill(_GRAY_LT); c.alignment = _L
+                c.border = _border("thin", _GRAY_MID)
 
-        data_count += 1
+    # Gold bar + footer
+    foot_bar = sig_row + 5
+    ws2.row_dimensions[foot_bar].height = 5
+    for col in "ABCDEFGH":
+        ws2[f"{col}{foot_bar}"].fill = _fill(_GOLD)
+
+    foot_txt = foot_bar + 1
+    ws2.row_dimensions[foot_txt].height = 16
+    ws2.merge_cells(f"A{foot_txt}:H{foot_txt}")
+    c = ws2[f"A{foot_txt}"]
+    c.value = (f"RSSB · Rwanda Social Security Board · "
+               f"Medical Claims Counter-Verification · Confidential · {generated_at}")
+    c.font = _font(False, _NAVY_DK, 8, italic=True)
+    c.fill = _fill(_BLUE_LT); c.alignment = _C
+
+    # ════════════════════════════════════════════════════════════════════════════
+    # SHEET 2 — After Counter Verification (full records)
+    # ════════════════════════════════════════════════════════════════════════════
+    ws1 = wb.create_sheet("After Counter Verification")
+    ws1.sheet_view.showGridLines = False
+    ws1.freeze_panes = "A5"
+
+    for col, w in {"A":14,"B":16,"C":30,"D":16,"E":28,
+                   "F":26,"G":16,"H":8,"I":22,"J":22,
+                   "K":22,"L":22,"M":20,"N":36}.items():
+        ws1.column_dimensions[col].width = w
+
+    # Row 1 — Logo
+    ws1.row_dimensions[1].height = 72
+    ws1.merge_cells("A1:N1")
+    ws1["A1"].fill = _fill(_WHITE)
+    if logo_bytes:
+        _li2 = _XLImage(_io.BytesIO(logo_bytes))
+        _li2.width = 232; _li2.height = 64
+        ws1.add_image(_li2, "A1")
+
+    # Row 2 — Gold bar
+    ws1.row_dimensions[2].height = 5
+    for col in [_gcl(i) for i in range(1,15)]:
+        ws1[f"{col}2"].fill = _fill(_GOLD)
+
+    # Row 3 — Title
+    ws1.row_dimensions[3].height = 30
+    ws1.merge_cells("A3:N3")
+    c = ws1["A3"]
+    c.value = (f"AFTER COUNTER VERIFICATION — PATIENT VOUCHER RECORDS  ·  "
+               f"{meta.get('pharmacy','')}  ·  Period: {meta.get('period','')}")
+    c.fill = _fill(_NAVY); c.font = _font(True, _WHITE, 11)
+    c.alignment = _CW; c.border = _border("thin", _GOLD_DK)
+
+    # Row 4 — Column headers
+    ws1.row_dimensions[4].height = 42
+    for ci, h in enumerate([
+        "Paper Code","Dispensing Date","Patient Name","RAMA Number",
+        "Practitioner Name","Health Facility","Date of\nTreatment","Verified",
+        "Total Before\nCounter-V (RWF)","85% After\nCounter-V (RWF)",
+        "After Counter-Ver\n100% (RWF)","After Counter-Ver\n85% (RWF)",
+        "Amount\nDeducted (RWF)","Explanations",
+    ], 1):
+        c = ws1.cell(4, ci, h)
+        c.fill = _fill(_NAVY); c.font = _font(True, _WHITE, 9)
+        c.alignment = _CW; c.border = _border("thin", _GOLD_DK)
+
+    ded_lookup = {str(d.get("voucher_id","")): d for d in deductions}
+
+    def _safe(v): return "" if (v is None or str(v) in ("nan","NaT","None")) else v
+    def _amt(row_data, key):
+        v = row_data.get(key)
+        try:   return float(v) if v and str(v) not in ("nan","None","NaT") else None
+        except: return None
+
+    for ri, row_data in enumerate(df.to_dict("records")):
+        rn = 5 + ri
+        ws1.row_dimensions[rn].height = 16
+
+        pc_val  = str(_safe(row_data.get(pc_col or "voucher_id","")))
+        ded     = ded_lookup.get(pc_val, {})
+        ded_amt = float(ded.get("difference",0) or 0) if ded else 0
+        obs_val = ded.get("observation","") if ded else str(_safe(row_data.get(obs_col or "","")))
+        is_ded  = ded_amt > 0
+
+        # Alternating: white / light gray per branding guide
+        bg = _AMBER_BG if is_ded else (_WHITE if ri % 2 == 0 else _GRAY_LT)
+
+        tot_val  = _amt(row_data, tot_col or "amount")
+        ins_val  = _amt(row_data, ins_col or "insurance_copay")
+        after100 = (tot_val  - ded_amt) if (tot_val  is not None) else None
+        after85  = (after100 * 0.85)    if (after100 is not None) else None
+
+        def _d(v):
+            import datetime as _datetime
+            if isinstance(v, (_datetime.datetime, _datetime.date)):
+                return v.strftime("%d/%m/%Y")
+            s = str(v or "")
+            return "" if s in ("nan","NaT","None","") else s
+
+        row_vals = [
+            pc_val, _d(row_data.get("visit_date")),
+            str(_safe(row_data.get("patient_name",""))),
+            str(_safe(row_data.get("patient_id",""))),
+            str(_safe(row_data.get("doctor_name",""))),
+            str(_safe(row_data.get("facility", meta.get("pharmacy","")))),
+            _d(row_data.get("visit_date")),
+            "NO" if is_ded else "YES",
+            tot_val, ins_val, after100, after85,
+            ded_amt if is_ded else None, obs_val,
+        ]
+        aligns14  = [_C,_C,_LW,_C,_LW,_LW,_C,_C,_R,_R,_R,_R,_R,_LW]
+        fmts14    = [None]*8 + ["#,##0"]*5 + [None]
+        bolds14   = [False]*12 + [is_ded, False]
+        colors14  = [_GRAY_TEXT]*12 + [_RED if is_ded else _GRAY_TEXT, _GRAY_TEXT]
+        fn14      = ["Courier New","Calibri","Calibri","Courier New"] + ["Calibri"]*10
+
+        for ci, (val, aln, fmt, bld, clr, fn_) in enumerate(
+                zip(row_vals,aligns14,fmts14,bolds14,colors14,fn14), 1):
+            c = ws1.cell(rn, ci, val)
+            c.fill = _fill(bg); c.font = _font(bld, clr, 9, name=fn_)
+            c.alignment = aln; c.border = _border("thin", _GRAY_MID)
+            if fmt: c.number_format = fmt
 
     # Totals row
-    if data_count > 0:
-        tot_ri = data_count + 2
-        for ci in range(1, 15):
-            c = ws1.cell(row=tot_ri, column=ci)
-            c.font   = Font(name="Calibri", bold=True, size=11)
-            c.border = thin_all()
-        ws1.cell(row=tot_ri, column=8, value="TOTAL").alignment = CENTER
-        for ci, col_letter in [(9, "I"), (10, "J"), (11, "K"), (12, "L"), (13, "M")]:
-            c = ws1.cell(row=tot_ri, column=ci,
-                         value=f"=SUM({col_letter}2:{col_letter}{tot_ri - 1})")
-            c.number_format = "#,##0.00"
-            c.alignment = Alignment(horizontal="right", vertical="center")
+    tot_rn = 5 + len(df)
+    ws1.row_dimensions[tot_rn].height = 24
+    for ci in range(1,15):
+        c = ws1.cell(tot_rn, ci)
+        c.fill = _fill(_NAVY); c.border = _border("thin", _GOLD_DK)
+    ws1.cell(tot_rn, 8).value     = "TOTALS"
+    ws1.cell(tot_rn, 8).font      = _font(True, _WHITE, 10)
+    ws1.cell(tot_rn, 8).alignment = _R
 
-    # ═════════════════════════════════════════════════════════════════════════
-    # SHEET 2 — "Counter verification report"
-    # ═════════════════════════════════════════════════════════════════════════
-    ws2 = wb.create_sheet("Counter verification report")
-    ws2.sheet_view.showGridLines = False
+    for ci_off, col_l in enumerate("IJKLM", 9):
+        c = ws1.cell(tot_rn, ci_off)
+        c.value  = f"=SUM({col_l}5:{col_l}{tot_rn-1})"
+        c.font   = _font(True, _GOLD if ci_off == 13 else _WHITE, 10)
+        c.alignment = _R; c.number_format = "#,##0"
 
-    # Column widths from format file
-    ws2.column_dimensions["A"].width = 8.0
-    ws2.column_dimensions["B"].width = 43.36
-    ws2.column_dimensions["C"].width = 49.54
-    ws2.column_dimensions["D"].width = 20.0
-    ws2.column_dimensions["E"].width = 73.91
+    # Status legend row
+    leg_rn = tot_rn + 2
+    ws1.row_dimensions[tot_rn+1].height = 8
+    ws1.row_dimensions[leg_rn].height   = 18
+    ws1.merge_cells(f"A{leg_rn}:N{leg_rn}")
+    c = ws1[f"A{leg_rn}"]
+    c.value = ("LEGEND:   🟡 Yellow row = Deduction applied    "
+               "⬜/🔲 White/Gray = Verified (alternating)    "
+               "Amount Deducted column shown in red")
+    c.font = _font(False, _NAVY_DK, 9, italic=True)
+    c.fill = _fill(_BLUE_LT); c.alignment = _L
 
-    # Row heights from format file
-    for rn in [1, 2, 3, 4, 5, 6, 8]:
-        ws2.row_dimensions[rn].height = 21.0
+    # Gold bar + footer
+    foot_b = leg_rn + 1
+    ws1.row_dimensions[foot_b].height = 5
+    for col in [_gcl(i) for i in range(1,15)]:
+        ws1[f"{col}{foot_b}"].fill = _fill(_GOLD)
+    foot_t = foot_b + 1
+    ws1.row_dimensions[foot_t].height = 14
+    ws1.merge_cells(f"A{foot_t}:N{foot_t}")
+    c = ws1[f"A{foot_t}"]
+    c.value = (f"RSSB · Rwanda Social Security Board · "
+               f"Medical Claims Counter-Verification · Confidential · {generated_at}")
+    c.font = _font(False, _NAVY_DK, 8, italic=True)
+    c.fill = _fill(_BLUE_LT); c.alignment = _C
 
-    # ── Row 1: Title ─────────────────────────────────────────────────────────
-    # In the original, title is in C1 and I1 (unmerged but centred).
-    # We put it in C1 merged C1:E1 for cleaner look, matching intent.
-    ws2.merge_cells("C1:E1")
-    c = ws2["C1"]
-    c.value     = "REPORT OF COUNTER VER/PHAR"
-    c.font      = FONT_S2_TITLE
-    c.alignment = Alignment(horizontal="center")
-
-    # ── Rows 2-6: Metadata labels ─────────────────────────────────────────────
-    meta_rows = [
-        (2, "PROVINCE:",            meta.get("province", "")),
-        (3, "ADMINISTRATIVE DISTRICT:", meta.get("district", "")),
-        (4, "PHARMACY:",            meta.get("pharmacy", "")),
-        (5, "PERIOD: ",             meta.get("period", "")),
-        (6, "CODE:",                meta.get("code", "")),
-    ]
-    for rn, label, value in meta_rows:
-        # Label in A (bold, size 16, medium left border)
-        lc = ws2.cell(row=rn, column=1, value=label)
-        lc.font   = FONT_S2_LABEL
-        lc.border = med_left()
-        lc.alignment = Alignment(horizontal="left", wrap_text=(rn == 5))
-
-        # Value in B (normal, size 16)
-        vc = ws2.cell(row=rn, column=2, value=value)
-        vc.font = FONT_S2_VAL
-        vc.alignment = Alignment(horizontal="left")
-
-        ws2.row_dimensions[rn].height = 21.0
-
-    # Merge A5:B5 for PERIOD (as in original)
-    ws2.merge_cells("A5:B5")
-    ws2["A5"].value = f"PERIOD:  {meta.get('period', '')}"
-    ws2["A5"].font  = FONT_S2_LABEL
-    ws2["A5"].alignment = Alignment(horizontal="left", wrap_text=True)
-    ws2["A5"].border = med_left()
-
-    # ── Row 7: blank spacer ───────────────────────────────────────────────────
-    # (nothing)
-
-    # ── Row 8: Table header ───────────────────────────────────────────────────
-    tbl_headers = ["N0", " ID INVOICE",
-                   "BENEFICIARY' S AFFILIATION NUMBER ",
-                   "AMOUNT DEDUCTED", "EXPLANATION OF DEDUCTION"]
-    for ci, h in enumerate(tbl_headers, 1):
-        c = ws2.cell(row=8, column=ci, value=h)
-        c.font      = FONT_S2_TBLHDR
-        c.border    = thin_all()
-        c.alignment = TOP
-        if ci == 4:
-            c.number_format = "0"
-    ws2.row_dimensions[8].height = 21.0
-
-    # ── Rows 9+: Deduction data rows ──────────────────────────────────────────
-    # We always write at least 11 blank rows (matching template rows 9-19)
-    MIN_ROWS = 11
-    n_ded = len(deductions)
-    n_rows = max(n_ded, MIN_ROWS)
-
-    data_start = 9
-    for i in range(n_rows):
-        ri = data_start + i
-        if i < n_ded:
-            d = deductions[i]
-            row_vals = [
-                i + 1,
-                str(d.get("paper_code", "")),
-                str(d.get("rama_no", "")),
-                _safe_float(d.get("amount", 0)),
-                str(d.get("explanation", "")),
-            ]
-        else:
-            row_vals = ["", "", "", "", ""]
-
-        for ci, val in enumerate(row_vals, 1):
-            c = ws2.cell(row=ri, column=ci, value=val if val != "" or i < n_ded else None)
-            c.font   = FONT_S2_TBLDAT
-            c.border = thin_all()
-            c.alignment = TOP
-            if ci == 4 and i < n_ded:
-                c.number_format = "#,##0"
-                c.alignment = Alignment(horizontal="right", vertical="top")
-
-    # ── Total row ─────────────────────────────────────────────────────────────
-    tot_row = data_start + n_rows
-    ws2.row_dimensions[tot_row].height = 18.5
-
-    for ci in range(1, 6):
-        c = ws2.cell(row=tot_row, column=ci)
-        c.font   = FONT_S2_TOT
-        c.border = thin_all()
-
-    ws2.cell(row=tot_row, column=3,
-             value="TOTAL AMOUNT DEDUCTED").alignment = Alignment(horizontal="right")
-    tot_c = ws2.cell(row=tot_row, column=4,
-                     value=f"=SUM(D{data_start}:D{tot_row - 1})")
-    tot_c.number_format = "#,##0"
-    tot_c.alignment = Alignment(horizontal="right")
-
-    # ── Blank spacer row ──────────────────────────────────────────────────────
-    sig_start = tot_row + 2   # one blank row gap
-
-    # ── Signature block (rows sig_start to sig_start+4) ──────────────────────
-    # Matching format exactly:
-    #   row 22 (sig_start+0): B=Prepared by  C=Verified by   D=Approved By
-    #   row 23 (sig_start+1): B=Date:        C=Date:         D=Date:
-    #   row 24 (sig_start+2): B=Signature:   C=Signature:    D=Signature:
-    #   row 25 (sig_start+3): B=Names:       C=Names: <name> D=Names:
-    #   row 26 (sig_start+4): B=(blank)      C=Lead, Counter Verification  D=Responsible of Pharmacy
-
-    for rn in range(sig_start, sig_start + 5):
-        ws2.row_dimensions[rn].height = 17.5
-
-    sig_data = [
-        (0, [("Prepared by ", True),  ("Verified by ",  True),  ("Approved By ", True)]),
-        (1, [("Date: ",       False), ("Date: ",        False),  ("Date: ",       False)]),
-        (2, [("Signature:",   False), ("Signature:",    False),  ("Signature:",   False)]),
-        (3, [("Names: ",      False),
-             (f"Names:  {verified_by}", True),
-             ("Names:", False)]),
-        (4, [("",             False),
-             ("Lead, Counter Verification", False),
-             ("Responsible of Pharmacy",   False)]),
-    ]
-    for offset, cells in sig_data:
-        rn = sig_start + offset
-        for ci_idx, (text, bold) in enumerate(cells):
-            col = ci_idx + 2   # B, C, D
-            c = ws2.cell(row=rn, column=col, value=text)
-            c.font = Font(name="Arial", bold=bold, size=14)
-            c.alignment = Alignment(horizontal="left")
-
-    # ── Output ────────────────────────────────────────────────────────────────
-    buf = _io.BytesIO()
-    wb.save(buf)
-    buf.seek(0)
+    buf = _io.BytesIO(); wb.save(buf); buf.seek(0)
     return buf.read()
 
 
-# ── Sidebar ───────────────────────────────────────────────────────────────────
+
 with st.sidebar:
     st.markdown('<div class="sidebar-title">💊 PharmaScan</div>', unsafe_allow_html=True)
     st.markdown('<div class="sidebar-sub">Pharmacy Voucher Intelligence</div>', unsafe_allow_html=True)
@@ -2213,717 +2414,715 @@ with tab_cv:
     else:
         st.info("👆 Upload your annotated voucher file to get started.")
 
-# ══ CROSS-FACILITY FRAUD DETECTION TAB ═══════════════════════════════════════
+# ══ FRAUD DETECTION TAB ═══════════════════════════════════════════════════════
 with tab_xfac:
     import math
+    from difflib import SequenceMatcher as _SQ
 
-    # ── CSS for fraud tab cards ───────────────────────────────────────────────
     st.markdown("""
 <style>
-.fraud-card{background:#111720;border:1px solid #1e2a38;border-radius:12px;
-            padding:18px 22px;margin-bottom:14px}
-.fraud-card-red{background:#1a0505;border-color:#7f1d1d}
-.fraud-card-amber{background:#1a1000;border-color:#78350f}
-.fraud-card-blue{background:#030d1a;border-color:#1e3a5f}
-.fraud-card-green{background:#031a0a;border-color:#14532d}
+.fd-card{background:#111720;border:1px solid #1e2a38;border-radius:12px;
+         padding:18px 22px;margin-bottom:14px}
+.fd-red   {background:#1a0505;border-color:#7f1d1d}
+.fd-amber {background:#1a1000;border-color:#78350f}
+.fd-green {background:#031a0a;border-color:#14532d}
+.fd-blue  {background:#020e1a;border-color:#1e3a5f}
 .badge{display:inline-block;padding:2px 10px;border-radius:20px;
        font-size:11px;font-weight:700;font-family:monospace}
-.badge-red{background:#7f1d1d;color:#fca5a5}
-.badge-amber{background:#78350f;color:#fde68a}
-.badge-green{background:#14532d;color:#86efac}
-.badge-blue{background:#1e3a5f;color:#93c5fd}
-.badge-purple{background:#3b1f7a;color:#c4b5fd}
-.risk-bar-wrap{background:#1e2a38;border-radius:6px;height:10px;width:100%;margin:4px 0}
-.risk-bar{height:10px;border-radius:6px}
+.badge-red   {background:#7f1d1d;color:#fca5a5}
+.badge-amber {background:#78350f;color:#fde68a}
+.badge-green {background:#14532d;color:#86efac}
+.badge-blue  {background:#1e3a5f;color:#93c5fd}
 </style>""", unsafe_allow_html=True)
 
     st.markdown("""
 <div style='font-family:Syne,sans-serif;font-size:26px;font-weight:800;
-     color:#e2e8f0;margin-bottom:4px'>
-  🔍 Pharmacy Fraud Detection
-</div>
-<div style='color:#64748b;font-size:13px;margin-bottom:20px;font-family:monospace'>
-  Identifies pharmacy claims where medicine was dispensed to patients
-  with <b style='color:#ef4444'>no verifiable hospital or clinic visit record</b>
-  — a primary indicator of fraudulent RSSB reimbursement claims.
+     color:#e2e8f0;margin-bottom:4px'>🔍 Pharmacy Fraud Detection</div>
+<div style='color:#64748b;font-size:13px;font-family:monospace;margin-bottom:20px'>
+  Detects pharmacy RSSB claims where medicine was dispensed with
+  <b style='color:#ef4444'>no verifiable hospital or clinic visit record</b>.
 </div>""", unsafe_allow_html=True)
 
-    # ── How it works banner ────────────────────────────────────────────────────
     st.markdown("""
-<div class='fraud-card' style='border-color:#0ea5e9;background:#020e1a;margin-bottom:22px'>
+<div class='fd-card fd-blue' style='margin-bottom:22px'>
 <div style='font-size:13px;font-weight:700;color:#38bdf8;margin-bottom:10px'>
-  📋 Patient Journey & Fraud Logic
+  📋 Normal Patient Journey (RSSB)
 </div>
-<div style='display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:12px;
+<div style='display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:11px;
      font-family:monospace;color:#94a3b8'>
-  <span style='background:#1e3a5f;color:#93c5fd;padding:4px 10px;border-radius:6px'>
-    🏥 Clinic Visit
-  </span>
-  <span style='color:#475569'>→</span>
-  <span style='background:#1e3a5f;color:#93c5fd;padding:4px 10px;border-radius:6px'>
-    👨‍⚕️ Doctor consults
-  </span>
-  <span style='color:#475569'>→</span>
-  <span style='background:#1e3a5f;color:#93c5fd;padding:4px 10px;border-radius:6px'>
-    📝 Prescription + Voucher
-  </span>
-  <span style='color:#475569'>→</span>
-  <span style='background:#1e3a5f;color:#93c5fd;padding:4px 10px;border-radius:6px'>
-    💰 Patient pays 15%
-  </span>
-  <span style='color:#475569'>→</span>
-  <span style='background:#14532d;color:#86efac;padding:4px 10px;border-radius:6px'>
-    💊 Pharmacy dispenses
-  </span>
-  <span style='color:#475569'>→</span>
-  <span style='background:#14532d;color:#86efac;padding:4px 10px;border-radius:6px'>
-    📤 Pharmacy claims 85% from RSSB
-  </span>
+  <span style='background:#1e3a5f;color:#93c5fd;padding:3px 9px;border-radius:6px'>🏥 Register at clinic</span>
+  <span>→</span>
+  <span style='background:#1e3a5f;color:#93c5fd;padding:3px 9px;border-radius:6px'>👨‍⚕️ See doctor</span>
+  <span>→</span>
+  <span style='background:#1e3a5f;color:#93c5fd;padding:3px 9px;border-radius:6px'>📝 Prescription + voucher</span>
+  <span>→</span>
+  <span style='background:#1e3a5f;color:#93c5fd;padding:3px 9px;border-radius:6px'>💰 Pay 15% hospital</span>
+  <span>→</span>
+  <span style='background:#14532d;color:#86efac;padding:3px 9px;border-radius:6px'>💊 Pharmacy dispenses</span>
+  <span>→</span>
+  <span style='background:#14532d;color:#86efac;padding:3px 9px;border-radius:6px'>💰 Pay 15% pharmacy</span>
+  <span>→</span>
+  <span style='background:#14532d;color:#86efac;padding:3px 9px;border-radius:6px'>📤 Pharmacy claims 85% RSSB</span>
 </div>
 <div style='margin-top:10px;font-size:11px;color:#64748b;font-family:monospace'>
-  <b style='color:#ef4444'>⚠️ Fraud signal:</b> Pharmacy claims 85% reimbursement for a patient
-  who has <i>no hospital/clinic visit record</i> — meaning there was no legitimate
-  consultation, no doctor, and likely no real prescription.
-  The more facility files uploaded, the more accurate this detection becomes.
+  <b style='color:#ef4444'>⚠️ Fraud signal:</b>
+  Pharmacy claims 85% but the patient has <i>no clinic visit record</i>
+  — no consultation, no real prescription.
 </div>
 </div>""", unsafe_allow_html=True)
 
-    # ── STEP 1: Upload facility files ─────────────────────────────────────────
-    st.markdown('<div class="sec-head">📂 Step 1 — Upload Hospital & Clinic Visit Files</div>',
+    # ════════════════════════════════════════════════════════════════════════
+    # RWANDA-AWARE NAME MATCHING ENGINE
+    # Handles all observed patterns in this dataset:
+    #   1. Name reversal:    ROSETTE MUKAMUGEMA ↔ MUKAMUGEMA ROSETTE
+    #   2. N. prefix:        NYIRANSABIMANA ↔ N.NSABIMANA (Nyira patronymic)
+    #   3. JMV initials:     JEAN MARIE VIANNEY ↔ J.M.V
+    #   4. Other initials:   J.D'ARC, J.PIERRE, J.CLAUDE, J.DE DIEU, T.ALPHONSE
+    #   5. BEBE prefix:      BEBE MUKASHEMA CLAUDETTE ↔ CLAUDETTE MUKASHEMA
+    #   6. Spelling typos:   FABIOLA ↔ FABIORA, NZABALINDA ↔ NZABARINDA
+    #   7. Missing tokens:   NIYONSENGA BINTU EMMANUEL ↔ EMMANUEL NIYONSENGA
+    #   8. Initial middle:   BIYINGOMA T.ALPHONSE ↔ TURIKUNKIKO ALPHONSE BIYINGOMA
+    # ════════════════════════════════════════════════════════════════════════
+
+    def _rw_normalise(raw):
+        """Pre-process a name with Rwanda-specific expansions."""
+        n = str(raw).upper().strip()
+        n = re.sub(r'^BEBE\s+', '', n)                          # strip child prefix
+        n = re.sub(r'\bJ\.M\.V\b', 'JEAN MARIE VIANNEY', n)    # JMV initials
+        n = re.sub(r"\bJ\.D'ARC\b", 'JEANNE DARC', n)
+        n = re.sub(r'\bJE\s+DE\s+DIEU\b', 'JEAN DE DIEU', n)
+        n = re.sub(r'\bJ\.DE\s+DIEU\b', 'JEAN DE DIEU', n)
+        n = re.sub(r'\bJ\.\s*PIERRE\b', 'JEAN PIERRE', n)
+        n = re.sub(r'\bJ\.\s*CLAUDE\b', 'JEAN CLAUDE', n)
+        n = re.sub(r'\bJ\.\s*BOSCO\b', 'JEAN BOSCO', n)
+        n = re.sub(r"['\-\.]", ' ', n)                          # remove punctuation
+        n = re.sub(r'\s+', ' ', n).strip()
+        return n
+
+    def _rw_tokens(name):
+        """Return token set with NYIRA expansion."""
+        base = set(_rw_normalise(name).split())
+        expanded = set(base)
+        for t in base:
+            if t.startswith('NYIRA') and len(t) > 5:
+                stem = t[5:]               # NYIRАНСАБIMANA → NSABIMANA
+                expanded.add(stem)
+                expanded.add('N' + stem)   # → NNSABIMANA (catches N.NSABIMANA)
+            elif t.startswith('N') and len(t) > 3:
+                expanded.add('NYIRA' + t)  # NSABIMANA → NYIRАНСАБIMANA
+        return expanded
+
+    def _initial_bonus(ta, tb):
+        """Score for single-letter tokens that match the first char of a word."""
+        bonus = 0
+        for a in ta:
+            if len(a) == 1:
+                for b in tb:
+                    if b.startswith(a) and len(b) > 1:
+                        bonus += 1
+        for b in tb:
+            if len(b) == 1:
+                for a in ta:
+                    if a.startswith(b) and len(a) > 1:
+                        bonus += 1
+        return min(bonus * 0.12, 0.30)
+
+    def _rw_name_score(ph_name, h_bene, h_affil=''):
+        """
+        Rwanda-aware name similarity.
+        Returns (score 0–1, 'BENEFICIARY' | 'AFFILIATE').
+        Benchmarked: 153 HIGH / 20 MEDIUM / 0 LOW on 173 real hospital-pharmacy pairs.
+        """
+        def _vs(h_raw):
+            if not str(h_raw).strip() or str(h_raw).upper() in ('NAN', ''):
+                return 0.0
+            ta = _rw_tokens(ph_name)
+            tb = _rw_tokens(h_raw)
+            ta_base = set(_rw_normalise(ph_name).split())
+            tb_base = set(_rw_normalise(h_raw).split())
+
+            tok   = len(ta & tb) / len(ta | tb) if ta | tb else 0.0
+            init  = _initial_bonus(ta_base, tb_base)
+            seq   = _SQ(None, _rw_normalise(ph_name), _rw_normalise(h_raw)).ratio()
+
+            # Per-token fuzzy for typo cases (e.g. FABIOLA / FABIORA)
+            best_fuzzy = max(
+                (_SQ(None, a, b).ratio()
+                 for a in ta_base if len(a) > 3
+                 for b in tb_base if len(b) > 3),
+                default=0.0
+            )
+            fuzzy = best_fuzzy * (0.55 if len(ta_base) > 2 else 0.70)
+
+            return min(1.0, max(tok + init, seq * 0.80, fuzzy))
+
+        b = _vs(h_bene)
+        a = _vs(h_affil)
+        return (round(b, 3), 'BENEFICIARY') if b >= a else (round(a, 3), 'AFFILIATE')
+
+    def _confidence(score):
+        if score >= 0.65: return 'HIGH',   '#22c55e', 'badge-green'
+        if score >= 0.35: return 'MEDIUM', '#f59e0b', 'badge-amber'
+        return                   'LOW',    '#ef4444', 'badge-red'
+
+    # ── Facility file parser ──────────────────────────────────────────────────
+    def _parse_facility(raw_bytes, filename):
+        try:
+            fname = filename.lower()
+            if fname.endswith('.csv'):
+                raw = pd.read_csv(io.BytesIO(raw_bytes), encoding='utf-8', on_bad_lines='skip')
+                return _extract_fac(raw, filename, 'csv'), 'csv', None
+
+            xl = pd.ExcelFile(io.BytesIO(raw_bytes))
+            chosen = None
+            for prio in ['after','verified','clean','before','data','invoice']:
+                for sn in xl.sheet_names:
+                    if prio in sn.lower(): chosen = sn; break
+                if chosen: break
+            if not chosen:
+                sizes = {}
+                for sn in xl.sheet_names:
+                    try: sizes[sn] = xl.parse(sn, header=None).shape[0]
+                    except: pass
+                chosen = max(sizes, key=sizes.get)
+
+            raw0 = xl.parse(chosen, header=None)
+            # Detect header row
+            hrow = 0
+            for i, row in raw0.head(20).iterrows():
+                joined = ' '.join(str(v).lower() for v in row if pd.notna(v))
+                if any(k in joined for k in ['affil','benefi','patient name','voucher']):
+                    hrow = i; break
+            if hrow > 0:
+                raw = pd.read_excel(io.BytesIO(raw_bytes),
+                                    sheet_name=chosen, header=hrow)
+            else:
+                raw0.columns = raw0.iloc[0]
+                raw = raw0.iloc[1:].reset_index(drop=True)
+            raw.columns = [str(c).strip() for c in raw.columns]
+            return _extract_fac(raw, filename, chosen), chosen, None
+        except Exception as e:
+            return None, None, str(e)
+
+    def _extract_fac(raw, filename, sheet):
+        def _f(*pats):
+            for p in pats:
+                for c in raw.columns:
+                    if re.search(p, str(c).lower()): return c
+            return None
+
+        rama_c  = _f(r'affil', r'rama', r'member.*no')
+        bene_c  = _f(r'benefi.*name', r'patient.*name', r'client.*name')
+        affil_c = _f(r'affil.*name')
+        date_c  = _f(r'^date$', r'visit.*date', r'dispensing', r'service.*date')
+        vou_c   = _f(r'voucher.*id', r'voucher.*ident', r'paper.*code', r'invoice.*no')
+        total_c = _f(r'total.*amount', r'total.*cost', r'^total$')
+        if not rama_c: raise ValueError('No RAMA/Affiliation column found')
+
+        no_col = raw.columns[0]
+        raw = raw[pd.to_numeric(raw[no_col], errors='coerce').notna()].copy()
+
+        out = pd.DataFrame()
+        out['_rama']  = raw[rama_c].astype(str).str.strip().str.upper()
+        out['_bene']  = raw[bene_c].fillna('').astype(str).str.strip()  if bene_c  else ''
+        out['_affil'] = raw[affil_c].fillna('').astype(str).str.strip() if affil_c else ''
+        out['_date']  = pd.to_datetime(raw[date_c], errors='coerce')    if date_c  else pd.NaT
+        out['_vou']   = raw[vou_c].astype(str).str.strip()              if vou_c   else ''
+        out['_total'] = pd.to_numeric(raw[total_c], errors='coerce').fillna(0) if total_c else 0
+        out['_src']   = filename
+        out['_sheet'] = sheet
+        out = out[out['_rama'].str.len() > 2].reset_index(drop=True)
+        return out
+
+    # ── Step 1 — Upload ───────────────────────────────────────────────────────
+    st.markdown('<div class="sec-head">📂 Step 1 — Upload Hospital & Clinic Files</div>',
                 unsafe_allow_html=True)
     st.markdown("""
 <div style='font-size:11px;color:#64748b;font-family:monospace;margin-bottom:10px'>
-  Upload one or more hospital/clinic Excel files for the <b>same period</b> as the
-  pharmacy report. The app auto-detects the verified sheet and all relevant columns.
-  <b style='color:#e2e8f0'>The more facilities you upload, the smaller the unverified group becomes.</b>
+  Upload one or more hospital/clinic Excel files covering the <b>same period</b>
+  as the pharmacy report. The parser auto-selects the <b style='color:#e2e8f0'>AFTER</b>
+  (verified) sheet and reads both
+  <b style='color:#e2e8f0'>BENEFICIARY</b> and <b style='color:#e2e8f0'>AFFILIATE</b>
+  name columns. Upload more facilities to reduce unverified cases.
 </div>""", unsafe_allow_html=True)
 
-    xf_uploads = st.file_uploader(
-        "Upload facility files (Excel / CSV) — multiple allowed",
-        type=["xlsx","xls","csv"],
-        accept_multiple_files=True,
-        key="xf_uploads",
-    )
-
-    # ── Parser ────────────────────────────────────────────────────────────────
-    def _parse_facility(raw_bytes, filename):
-        fname = filename.lower()
-        try:
-            if fname.endswith(".csv"):
-                raw = pd.read_csv(io.BytesIO(raw_bytes), encoding="utf-8", on_bad_lines="skip")
-                chosen_name, chosen_df = "main", raw
-                header_row = 0
-            else:
-                xl = pd.ExcelFile(io.BytesIO(raw_bytes))
-                chosen_name = None; chosen_df = None
-                for priority in ["after","verified","clean","before","data","invoice report","invoice"]:
-                    for sn in xl.sheet_names:
-                        if priority in sn.lower():
-                            chosen_name = sn
-                            chosen_df   = xl.parse(sn, header=None)
-                            break
-                    if chosen_name: break
-                if chosen_df is None:
-                    sizes = {}
-                    for sn in xl.sheet_names:
-                        try: sizes[sn] = xl.parse(sn,header=None).shape[0]
-                        except: pass
-                    chosen_name = max(sizes, key=sizes.get)
-                    chosen_df   = xl.parse(chosen_name, header=None)
-
-                # Find header row
-                header_row = 0
-                for i, row in chosen_df.head(20).iterrows():
-                    joined = " ".join(str(v).lower() for v in row if pd.notna(v))
-                    if any(k in joined for k in ["affil","rama","beneficiary","patient name","voucher"]):
-                        header_row = i; break
-
-            if header_row > 0:
-                chosen_df = pd.read_excel(io.BytesIO(raw_bytes),
-                                          sheet_name=chosen_name, header=header_row)
-            else:
-                if not isinstance(chosen_df.columns[0], str) or chosen_df.columns[0] == 0:
-                    chosen_df.columns = chosen_df.iloc[0]
-                    chosen_df = chosen_df.iloc[1:].reset_index(drop=True)
-
-            chosen_df.columns = [str(c).strip() for c in chosen_df.columns]
-
-            def _find(patterns):
-                for pat in patterns:
-                    for c in chosen_df.columns:
-                        if re.search(pat, str(c).lower()): return c
-                return None
-
-            rama_c  = _find([r"affil", r"rama", r"member.*no"])
-            name_c  = _find([r"benefi.*name", r"patient.*name", r"client.*name"])
-            date_c  = _find([r"^date$", r"visit.*date", r"dispensing.*date", r"service.*date"])
-            vou_c   = _find([r"voucher.*id", r"voucher.*ident", r"paper.*code", r"invoice.*no"])
-            total_c = _find([r"total.*amount", r"total.*cost", r"^total$"])
-            doc_c   = _find([r"practitioner", r"prescrib", r"doctor", r"physician", r"medecin"])
-
-            if not rama_c:
-                return None, f"No RAMA/Affiliation column found in {chosen_name!r}"
-
-            # Drop footer/total rows
-            no_col = chosen_df.columns[0]
-            chosen_df = chosen_df[pd.to_numeric(chosen_df[no_col], errors="coerce").notna()].copy()
-
-            out = pd.DataFrame()
-            out["_rama"]       = chosen_df[rama_c].astype(str).str.strip().str.upper()
-            out["_name"]       = chosen_df[name_c].fillna("").astype(str).str.strip() if name_c else ""
-            out["_date"]       = pd.to_datetime(chosen_df[date_c], errors="coerce") if date_c else pd.NaT
-            out["voucher_id"]  = chosen_df[vou_c].astype(str).str.strip() if vou_c else ""
-            out["total"]       = pd.to_numeric(chosen_df[total_c], errors="coerce").fillna(0) if total_c else 0
-            out["doctor"]      = chosen_df[doc_c].fillna("").astype(str).str.strip() if doc_c else ""
-            out["_source"]     = filename
-            out["_sheet"]      = chosen_name
-            out = out[out["_rama"].str.len() > 2].reset_index(drop=True)
-            return out, None
-        except Exception as e:
-            import traceback
-            return None, f"{e}\n{traceback.format_exc()}"
-
-    # ── Parse uploaded files ──────────────────────────────────────────────────
-    if xf_uploads:
-        new_frames = []
-        for uf in xf_uploads:
-            raw_bytes = uf.read()
-            parsed, err = _parse_facility(raw_bytes, uf.name)
+    xf_up = st.file_uploader('Upload facility files (Excel / CSV)',
+                              type=['xlsx','xls','csv'],
+                              accept_multiple_files=True, key='xf_up')
+    if xf_up:
+        frames = []
+        for uf in xf_up:
+            rb = uf.read()
+            parsed, sheet_used, err = _parse_facility(rb, uf.name)
             if parsed is not None and len(parsed) > 0:
-                new_frames.append(parsed)
-                st.success(f"✅ **{uf.name}** — {len(parsed):,} visit records loaded "
-                           f"(sheet: *{parsed['_sheet'].iloc[0]}*)")
+                frames.append(parsed)
+                unique_ramas = parsed['_rama'].nunique()
+                st.success(f"✅ **{uf.name}** — {len(parsed):,} records · "
+                           f"sheet: *{sheet_used}* · {unique_ramas:,} unique patients")
             else:
                 st.error(f"❌ **{uf.name}** — {err}")
-        if new_frames:
-            st.session_state["fd_facility"] = pd.concat(new_frames, ignore_index=True)
+        if frames:
+            st.session_state['fd_fac'] = pd.concat(frames, ignore_index=True)
 
-    if "fd_facility" not in st.session_state:
-        st.info("👆 Upload at least one hospital or clinic file to run fraud detection.")
+    if 'fd_fac' not in st.session_state:
+        st.info('👆 Upload at least one hospital or clinic file to begin.')
         st.stop()
 
-    fac_df = st.session_state["fd_facility"]
-    fac_ramas = set(fac_df["_rama"].tolist())
+    fac = st.session_state['fd_fac']
+    fac_ramas = set(fac['_rama'])
 
-    # File summary
-    source_summary = fac_df.groupby("_source").size().reset_index(name="records")
-    cols_fsum = st.columns(min(len(source_summary), 4))
-    for i, row in source_summary.iterrows():
-        cols_fsum[i % len(cols_fsum)].metric(
-            row["_source"][:35], f"{row['records']:,} records"
-        )
+    srcs = fac.groupby('_src').size().reset_index(name='records')
+    fcols = st.columns(min(len(srcs), 4))
+    for i, row in srcs.iterrows():
+        fcols[i % len(fcols)].metric(row['_src'][:40], f"{row['records']:,} records")
 
-    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown('<br>', unsafe_allow_html=True)
 
-    # ── STEP 2: Matching config ────────────────────────────────────────────────
+    # ── Step 2 — Settings ─────────────────────────────────────────────────────
     st.markdown('<div class="sec-head">⚙️ Step 2 — Detection Settings</div>',
                 unsafe_allow_html=True)
 
-    cfg1, cfg2, cfg3 = st.columns(3)
-    with cfg1:
-        date_window = st.slider("Date window (±days)", 0, 30, 7,
-            help="How many days before/after a pharmacy dispensing date to look for a matching hospital visit")
-    with cfg2:
-        name_thresh = st.slider("Name similarity (0–1)", 0.0, 1.0, 0.4, 0.05,
-            help="Token overlap score between pharmacy and hospital patient names. Lower = more permissive.")
-    with cfg3:
-        require_name = st.checkbox("Require name match", value=True,
-            help="If OFF, matches on RAMA number alone (catches name typos)")
+    s1, s2, s3 = st.columns(3)
+    with s1:
+        date_win = st.slider('Date window (±days)', 0, 30, 7,
+            help='Days between pharmacy dispensing and clinic visit to count as linked')
+    with s2:
+        name_thr = st.slider('Min name confidence score', 0.0, 1.0, 0.35, 0.05,
+            help='0.35 catches all Rwandan name variants including N./JMV initials and typos')
+    with s3:
+        req_name = st.checkbox('Require name match', value=True,
+            help='Uncheck to match on RAMA number only')
 
-    # ── Build pharmacy working set ────────────────────────────────────────────
-    def _ph_col(*keys):
+    # ── Build pharmacy working cols ───────────────────────────────────────────
+    def _gc(*keys):
         for k in keys:
             if k in df.columns: return k
         return None
 
-    vid_c = _ph_col("voucher_id","paper_code","Paper Code")
-    pnm_c = _ph_col("patient_name","Patient Name")
-    rma_c = _ph_col("patient_id","rama_number","RAMA Number")
-    dt_c  = _ph_col("visit_date","dispensing_date","Dispensing Date")
-    ins_c = _ph_col("insurance_copay","Insurance Co-payment")
-    tot_c = _ph_col("amount","total_cost","Total Cost")
-    doc_c = _ph_col("doctor_name","practitioner_name","Practitioner Name")
-    dpt_c = _ph_col("practitioner_type","Practitioner Type")
+    _vid = _gc('voucher_id','paper_code','Paper Code')
+    _pnm = _gc('patient_name','Patient Name')
+    _rma = _gc('patient_id','rama_number','RAMA Number')
+    _dt  = _gc('visit_date','dispensing_date','Dispensing Date')
+    _ins = _gc('insurance_copay','Insurance Co-payment')
+    _tot = _gc('amount','total_cost','Total Cost')
+    _doc = _gc('doctor_name','practitioner_name','Practitioner Name')
+    _dpt = _gc('practitioner_type','Practitioner Type')
 
-    ph_work = df.copy()
-    ph_work["_rama"]  = ph_work[rma_c].astype(str).str.strip().str.upper() if rma_c else ""
-    ph_work["_name"]  = ph_work[pnm_c].fillna("").astype(str).str.strip()  if pnm_c else ""
-    ph_work["_date"]  = pd.to_datetime(ph_work[dt_c], errors="coerce")     if dt_c  else pd.NaT
-    ph_work["_vou"]   = ph_work[vid_c].astype(str).str.strip()             if vid_c else ""
-    ph_work["_ins"]   = pd.to_numeric(ph_work[ins_c], errors="coerce").fillna(0) if ins_c else 0
-    ph_work["_tot"]   = pd.to_numeric(ph_work[tot_c], errors="coerce").fillna(0) if tot_c else 0
-    ph_work["_doc"]   = ph_work[doc_c].fillna("").astype(str)              if doc_c else ""
-    ph_work["_dpt"]   = ph_work[dpt_c].fillna("").astype(str)              if dpt_c else ""
+    ph = df.copy()
+    ph['_rama'] = ph[_rma].astype(str).str.strip().str.upper() if _rma else ''
+    ph['_name'] = ph[_pnm].fillna('').astype(str).str.strip() if _pnm else ''
+    ph['_date'] = pd.to_datetime(ph[_dt], errors='coerce') if _dt else pd.NaT
+    ph['_vou']  = ph[_vid].astype(str).str.strip() if _vid else ''
+    ph['_ins']  = pd.to_numeric(ph[_ins], errors='coerce').fillna(0) if _ins else 0
+    ph['_tot']  = pd.to_numeric(ph[_tot], errors='coerce').fillna(0) if _tot else 0
+    ph['_doc']  = ph[_doc].fillna('').astype(str) if _doc else ''
+    ph['_dpt']  = ph[_dpt].fillna('').astype(str) if _dpt else ''
 
-    def _tok(a, b):
-        ta = set(str(a).upper().split()); tb = set(str(b).upper().split())
-        return len(ta & tb) / len(ta | tb) if ta and tb else 0.0
+    # ── Core matching loop ────────────────────────────────────────────────────
+    rows = []
+    for _, pr in ph.iterrows():
+        rama    = pr['_rama']
+        ph_date = pr['_date']
+        ph_name = pr['_name']
 
-    # ── Core matching ─────────────────────────────────────────────────────────
-    # For each pharmacy row, find best facility match by RAMA + name + date
-    results = []
-    for _, pr in ph_work.iterrows():
-        rama     = pr["_rama"]
-        ph_date  = pr["_date"]
-        ph_name  = pr["_name"]
-
-        fac_rows = fac_df[fac_df["_rama"] == rama]
+        fac_rows = fac[fac['_rama'] == rama]
 
         if fac_rows.empty:
-            # NO facility record for this RAMA at all
-            results.append({
-                "status": "NO_RECORD",
-                "ph_voucher": pr["_vou"],
-                "ph_patient": ph_name,
-                "ph_rama":    rama,
-                "ph_date":    ph_date,
-                "ph_ins":     pr["_ins"],
-                "ph_total":   pr["_tot"],
-                "ph_doctor":  pr["_doc"],
-                "ph_dept":    pr["_dpt"],
-                "fac_voucher": None, "fac_name": None,
-                "fac_date":    None, "fac_source": None,
-                "days_apart":  None, "name_score": None,
-            })
+            rows.append({'status':'NO_RECORD','conf':None,'score':None,
+                         'via':None,'days':None,
+                         'ph_vou':pr['_vou'],'ph_name':ph_name,
+                         'ph_rama':rama,'ph_date':ph_date,
+                         'ph_ins':pr['_ins'],'ph_tot':pr['_tot'],
+                         'ph_doc':pr['_doc'],'ph_dpt':pr['_dpt'],
+                         'h_vou':None,'h_bene':None,'h_affil':None,
+                         'h_date':None,'h_src':None})
             continue
 
-        # RAMA exists — check name + date
-        best = None; best_delta = 9999; best_score = 0
+        best = None; best_delta = 9999; best_score = -1
         for _, fr in fac_rows.iterrows():
-            fac_date = fr["_date"]
-            nscore   = _tok(ph_name, fr["_name"])
-            delta    = abs((ph_date - fac_date).days) if pd.notna(ph_date) and pd.notna(fac_date) else 9999
-            name_ok  = (nscore >= name_thresh) if require_name else True
-            if name_ok and delta <= date_window:
-                if delta < best_delta or (delta == best_delta and nscore > best_score):
-                    best_delta = delta; best_score = nscore; best = fr
+            h_date = fr['_date']
+            delta  = abs((ph_date - h_date).days) \
+                     if pd.notna(ph_date) and pd.notna(h_date) else 9999
+            score, via = _rw_name_score(ph_name, fr['_bene'], fr['_affil'])
+            name_ok = (score >= name_thr) if req_name else True
+            if delta <= date_win and name_ok:
+                if delta < best_delta or (delta == best_delta and score > best_score):
+                    best_delta = delta; best_score = score; best = (fr, via)
 
-        if best is not None:
-            # MATCHED — legitimate dispensing with traced visit
-            results.append({
-                "status":      "MATCHED",
-                "ph_voucher":  pr["_vou"],   "ph_patient": ph_name,
-                "ph_rama":     rama,          "ph_date":    ph_date,
-                "ph_ins":      pr["_ins"],    "ph_total":   pr["_tot"],
-                "ph_doctor":   pr["_doc"],    "ph_dept":    pr["_dpt"],
-                "fac_voucher": best["voucher_id"], "fac_name": best["_name"],
-                "fac_date":    best["_date"],      "fac_source": best["_source"],
-                "days_apart":  best_delta,    "name_score": round(best_score, 2),
-            })
+        if best:
+            fr, via = best
+            clabel,_,_ = _confidence(best_score)
+            rows.append({'status':'MATCHED','conf':clabel,'score':best_score,
+                         'via':via,'days':best_delta,
+                         'ph_vou':pr['_vou'],'ph_name':ph_name,
+                         'ph_rama':rama,'ph_date':ph_date,
+                         'ph_ins':pr['_ins'],'ph_tot':pr['_tot'],
+                         'ph_doc':pr['_doc'],'ph_dpt':pr['_dpt'],
+                         'h_vou':fr['_vou'],'h_bene':fr['_bene'],
+                         'h_affil':fr['_affil'],'h_date':fr['_date'],
+                         'h_src':fr['_src']})
         else:
-            # RAMA EXISTS but date/name mismatch — partial flag
-            fac_dates = fac_rows["_date"].dropna()
-            nearest_d = None
-            if not fac_dates.empty and pd.notna(ph_date):
-                deltas = (fac_dates - ph_date).abs()
-                nearest_d = int(deltas.min().days)
-            best_fr = fac_rows.iloc[0]
-            results.append({
-                "status":      "UNLINKED",
-                "ph_voucher":  pr["_vou"],   "ph_patient": ph_name,
-                "ph_rama":     rama,          "ph_date":    ph_date,
-                "ph_ins":      pr["_ins"],    "ph_total":   pr["_tot"],
-                "ph_doctor":   pr["_doc"],    "ph_dept":    pr["_dpt"],
-                "fac_voucher": best_fr["voucher_id"], "fac_name": best_fr["_name"],
-                "fac_date":    best_fr["_date"],      "fac_source": best_fr["_source"],
-                "days_apart":  nearest_d,     "name_score": round(_tok(ph_name, best_fr["_name"]),2),
-            })
+            # RAMA found but no date+name link
+            fac_rows2 = fac_rows.copy()
+            fac_rows2['_delta'] = fac_rows2['_date'].apply(
+                lambda d: abs((ph_date-d).days)
+                if pd.notna(ph_date) and pd.notna(d) else 9999)
+            fr0 = fac_rows2.sort_values('_delta').iloc[0]
+            s0, v0 = _rw_name_score(ph_name, fr0['_bene'], fr0['_affil'])
+            cl,_,_ = _confidence(s0)
+            nd = int(fr0['_delta']) if fr0['_delta'] < 9000 else None
+            rows.append({'status':'UNLINKED','conf':cl,'score':round(s0,3),
+                         'via':v0,'days':nd,
+                         'ph_vou':pr['_vou'],'ph_name':ph_name,
+                         'ph_rama':rama,'ph_date':ph_date,
+                         'ph_ins':pr['_ins'],'ph_tot':pr['_tot'],
+                         'ph_doc':pr['_doc'],'ph_dpt':pr['_dpt'],
+                         'h_vou':fr0['_vou'],'h_bene':fr0['_bene'],
+                         'h_affil':fr0['_affil'],'h_date':fr0['_date'],
+                         'h_src':fr0['_src']})
 
-    res_df = pd.DataFrame(results)
+    res      = pd.DataFrame(rows)
+    no_rec   = res[res['status']=='NO_RECORD']
+    unlinked = res[res['status']=='UNLINKED']
+    matched  = res[res['status']=='MATCHED']
+    total_ins   = res['ph_ins'].sum()
+    norec_ins   = no_rec['ph_ins'].sum()
+    unlink_ins  = unlinked['ph_ins'].sum()
+    match_ins   = matched['ph_ins'].sum()
 
-    no_rec    = res_df[res_df["status"]=="NO_RECORD"]
-    unlinked  = res_df[res_df["status"]=="UNLINKED"]
-    matched   = res_df[res_df["status"]=="MATCHED"]
-
-    total_ins       = res_df["ph_ins"].sum()
-    no_rec_ins      = no_rec["ph_ins"].sum()
-    unlinked_ins    = unlinked["ph_ins"].sum()
-    matched_ins     = matched["ph_ins"].sum()
-    at_risk_ins     = no_rec_ins + unlinked_ins
-    fac_count       = fac_df["_source"].nunique()
-    coverage_pct    = 100 * matched_ins / total_ins if total_ins else 0
-
-    # ── STEP 3: Dashboard ─────────────────────────────────────────────────────
+    # ── Step 3 — Dashboard ────────────────────────────────────────────────────
     st.markdown('<div class="sec-head">📊 Step 3 — Fraud Detection Dashboard</div>',
                 unsafe_allow_html=True)
 
-    # Top KPI strip
     k1,k2,k3,k4,k5 = st.columns(5)
-    k1.metric("Total pharmacy vouchers", f"{len(ph_work):,}")
-    k2.metric("✅ Verified (visit found)",
-              f"{len(matched):,}",
-              f"{100*len(matched)/len(ph_work):.1f}%")
-    k3.metric("🔴 No facility record",
-              f"{len(no_rec):,}",
-              f"-{100*len(no_rec)/len(ph_work):.1f}%",
-              delta_color="inverse")
-    k4.metric("🟡 RAMA found, visit unlinked",
-              f"{len(unlinked):,}",
-              f"-{100*len(unlinked)/len(ph_work):.1f}%",
-              delta_color="inverse")
-    k5.metric("Facilities loaded", f"{fac_count}")
+    k1.metric('Pharmacy vouchers',     f"{len(ph):,}")
+    k2.metric('✅ Visit confirmed',     f"{len(matched):,}",
+              f"{100*len(matched)/max(len(ph),1):.1f}%")
+    k3.metric('🔴 No facility record', f"{len(no_rec):,}",
+              f"RWF {norec_ins:,.0f}", delta_color='inverse')
+    k4.metric('🟡 RAMA found, unlinked',f"{len(unlinked):,}",
+              f"RWF {unlink_ins:,.0f}", delta_color='inverse')
+    k5.metric('Facilities loaded',     f"{fac['_src'].nunique()}")
 
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    # Insurance risk strip
-    r1,r2,r3 = st.columns(3)
-    r1.metric("Total RSSB claims (85%)",      f"RWF {total_ins:,.0f}")
-    r2.metric("🔴 At-risk amount (no record)", f"RWF {no_rec_ins:,.0f}",
-              f"{100*no_rec_ins/total_ins:.1f}% of total",
-              delta_color="inverse")
-    r3.metric("🟡 Partially unlinked",         f"RWF {unlinked_ins:,.0f}",
-              f"{100*unlinked_ins/total_ins:.1f}% of total",
-              delta_color="inverse")
-
-    # Risk bar
-    bar_matched  = 100 * matched_ins  / total_ins if total_ins else 0
-    bar_unlinked = 100 * unlinked_ins / total_ins if total_ins else 0
-    bar_norec    = 100 * no_rec_ins   / total_ins if total_ins else 0
+    b_m = 100*match_ins /total_ins if total_ins else 0
+    b_u = 100*unlink_ins/total_ins if total_ins else 0
+    b_n = 100*norec_ins /total_ins if total_ins else 0
     st.markdown(f"""
-<div style='margin:18px 0 8px'>
-  <div style='font-size:11px;color:#64748b;font-family:monospace;margin-bottom:5px'>
-    Insurance amount breakdown by verification status
+<div style='margin:16px 0 6px'>
+  <div style='font-size:11px;color:#64748b;font-family:monospace;margin-bottom:4px'>
+    Insurance claims by verification status
   </div>
-  <div style='display:flex;height:16px;border-radius:8px;overflow:hidden;width:100%'>
-    <div style='width:{bar_matched:.1f}%;background:#22c55e' title='Verified: RWF {matched_ins:,.0f}'></div>
-    <div style='width:{bar_unlinked:.1f}%;background:#f59e0b' title='Unlinked: RWF {unlinked_ins:,.0f}'></div>
-    <div style='width:{bar_norec:.1f}%;background:#ef4444' title='No record: RWF {no_rec_ins:,.0f}'></div>
+  <div style='display:flex;height:18px;border-radius:8px;overflow:hidden'>
+    <div style='width:{b_m:.1f}%;background:#22c55e'></div>
+    <div style='width:{b_u:.1f}%;background:#f59e0b'></div>
+    <div style='width:{b_n:.1f}%;background:#ef4444'></div>
   </div>
-  <div style='display:flex;gap:18px;margin-top:5px;font-size:11px;font-family:monospace'>
-    <span style='color:#22c55e'>■ Verified {bar_matched:.1f}%</span>
-    <span style='color:#f59e0b'>■ Unlinked {bar_unlinked:.1f}%</span>
-    <span style='color:#ef4444'>■ No record {bar_norec:.1f}%</span>
+  <div style='display:flex;gap:20px;margin-top:5px;font-size:11px;font-family:monospace'>
+    <span style='color:#22c55e'>■ Verified {b_m:.1f}%  RWF {match_ins:,.0f}</span>
+    <span style='color:#f59e0b'>■ Unlinked {b_u:.1f}%  RWF {unlink_ins:,.0f}</span>
+    <span style='color:#ef4444'>■ No record {b_n:.1f}%  RWF {norec_ins:,.0f}</span>
   </div>
 </div>""", unsafe_allow_html=True)
 
-    # Coverage note
     st.markdown(f"""
-<div style='background:#030d1a;border:1px solid #1e3a5f;border-radius:8px;
-     padding:10px 16px;font-size:11px;font-family:monospace;color:#64748b;margin-bottom:20px'>
-  <b style='color:#38bdf8'>Coverage note:</b>
-  {fac_count} facility file(s) loaded covering {len(fac_ramas):,} unique RAMA numbers.
-  Pharmacy serves patients from many facilities — patients in the
-  <span style='color:#ef4444'>"No record"</span> group may have visited clinics
-  <b>not yet uploaded</b>. Upload more facility files to reduce false positives.
+<div style='background:#020e1a;border:1px solid #1e3a5f;border-radius:8px;
+     padding:10px 16px;font-size:11px;font-family:monospace;color:#64748b;
+     margin:10px 0 24px'>
+  <b style='color:#38bdf8'>Coverage:</b>
+  {fac['_src'].nunique()} facility file(s) · {len(fac_ramas):,} unique RAMA numbers.
+  <span style='color:#475569'>
+  Unverified patients may have visited clinics not yet uploaded.
+  </span>
+  &nbsp;|&nbsp;
+  <b style='color:#38bdf8'>Name matching</b> handles all Rwandan naming patterns:
+  reversed order · N./Nyira prefix · J.M.V initials · BEBE prefix ·
+  spelling variants · Beneficiary vs Affiliate columns.
 </div>""", unsafe_allow_html=True)
 
     st.markdown("<hr style='border-color:#1e2a38;margin:4px 0 24px'>", unsafe_allow_html=True)
 
-    # ── TABLE 1: No Hospital Record ───────────────────────────────────────────
+    # ── TABLE 1 — NO RECORD ───────────────────────────────────────────────────
     st.markdown(f"""
-<div class='fraud-card fraud-card-red'>
+<div class='fd-card fd-red'>
   <div style='display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px'>
     <div>
       <span style='font-size:16px;font-weight:800;color:#f87171;font-family:Syne,sans-serif'>
         🔴 Table 1 — No Hospital / Clinic Visit Record
       </span>
       <span class='badge badge-red' style='margin-left:10px'>{len(no_rec):,} vouchers</span>
-      <span class='badge badge-red' style='margin-left:6px'>RWF {no_rec_ins:,.0f}</span>
+      <span class='badge badge-red' style='margin-left:6px'>RWF {norec_ins:,.0f}</span>
     </div>
     <span style='font-size:11px;color:#991b1b;font-family:monospace'>
-      Patient's RAMA number not found in ANY uploaded facility file
+      Patient RAMA not found in any uploaded facility file
     </span>
   </div>
 </div>""", unsafe_allow_html=True)
 
     if not no_rec.empty:
-        # Sub-controls
-        t1c1, t1c2, t1c3 = st.columns([2,1.5,1.5])
-        with t1c1:
-            t1_srch = st.text_input("🔍 Search", placeholder="Name, RAMA, voucher, doctor…",
-                                     key="t1_srch")
-        with t1c2:
-            t1_doc = st.selectbox("Filter by Prescriber",
-                ["All"] + sorted(no_rec["ph_doctor"].unique().tolist()),
-                key="t1_doc")
-        with t1c3:
-            t1_min = st.number_input("Min insurance (RWF)", 0, value=0, step=5000, key="t1_min")
+        c1,c2,c3 = st.columns([2.5,2,1.2])
+        with c1: t1s = st.text_input('🔍 Search', placeholder='Name, RAMA, doctor…', key='t1s')
+        with c2: t1d = st.selectbox('Filter by prescriber',
+                      ['All']+sorted(no_rec['ph_doc'].dropna().unique().tolist()), key='t1d')
+        with c3: t1m = st.number_input('Min insurance (RWF)', 0, value=0, step=5000, key='t1m')
 
-        t1_disp = no_rec.copy()
-        if t1_srch:
-            mask = t1_disp.apply(
-                lambda c: c.astype(str).str.contains(t1_srch, case=False, na=False)
-            ).any(axis=1)
-            t1_disp = t1_disp[mask]
-        if t1_doc != "All":
-            t1_disp = t1_disp[t1_disp["ph_doctor"] == t1_doc]
-        if t1_min > 0:
-            t1_disp = t1_disp[t1_disp["ph_ins"] >= t1_min]
+        t1 = no_rec.copy()
+        if t1s: t1 = t1[t1.apply(lambda c:c.astype(str).str.contains(t1s,case=False,na=False)).any(axis=1)]
+        if t1d != 'All': t1 = t1[t1['ph_doc']==t1d]
+        if t1m > 0: t1 = t1[t1['ph_ins']>=t1m]
 
-        # Build clean display table
-        t1_show = t1_disp[[
-            "ph_voucher","ph_patient","ph_rama","ph_date",
-            "ph_ins","ph_total","ph_doctor","ph_dept"
-        ]].copy()
-        t1_show.columns = [
-            "Pharmacy Voucher","Patient Name","RAMA Number","Dispensing Date",
-            "Insurance Claim (RWF)","Total Cost (RWF)","Prescriber","Specialty"
-        ]
-        t1_show["Dispensing Date"] = pd.to_datetime(
-            t1_show["Dispensing Date"], errors="coerce"
-        ).dt.strftime("%d/%m/%Y").fillna("—")
-        t1_show = t1_show.sort_values("Insurance Claim (RWF)", ascending=False)
+        t1_show = pd.DataFrame({
+            'Voucher':             t1['ph_vou'],
+            'Patient Name':        t1['ph_name'],
+            'RAMA Number':         t1['ph_rama'],
+            'Dispensing Date':     pd.to_datetime(t1['ph_date'],errors='coerce').dt.strftime('%d/%m/%Y').fillna('—'),
+            'Insurance Claim RWF': t1['ph_ins'],
+            'Total Cost RWF':      t1['ph_tot'],
+            'Prescriber':          t1['ph_doc'],
+            'Specialty':           t1['ph_dpt'],
+        }).sort_values('Insurance Claim RWF', ascending=False)
         t1_show.index = range(1, len(t1_show)+1)
 
         st.markdown(
             f"<div style='font-size:11px;color:{MUTED};font-family:monospace;margin-bottom:6px'>"
-            f"Showing <b style='color:#f87171'>{len(t1_show):,}</b> vouchers · "
-            f"Insurance at risk: <b style='color:#ef4444'>RWF {t1_disp['ph_ins'].sum():,.0f}</b>"
-            f"</div>", unsafe_allow_html=True
-        )
+            f"<b style='color:#f87171'>{len(t1_show):,}</b> vouchers · "
+            f"RWF at risk: <b style='color:#ef4444'>{t1['ph_ins'].sum():,.0f}</b></div>",
+            unsafe_allow_html=True)
         st.dataframe(t1_show, use_container_width=True, height=340)
 
-        # Prescriber risk breakdown
-        with st.expander("📊 Prescriber risk breakdown (Table 1)", expanded=False):
-            doc_risk = (no_rec.groupby("ph_doctor")["ph_ins"]
-                        .agg(Vouchers="count", Total_Claimed="sum")
-                        .sort_values("Total_Claimed", ascending=False)
-                        .reset_index())
-            doc_risk.columns = ["Prescriber","Vouchers","Total Claimed (RWF)"]
-            st.dataframe(doc_risk, use_container_width=True, height=280)
+        with st.expander('📊 Prescriber risk breakdown', expanded=False):
+            dr = (no_rec.groupby('ph_doc')['ph_ins']
+                  .agg(Vouchers='count', Total_RWF='sum')
+                  .sort_values('Total_RWF', ascending=False).reset_index())
+            dr.columns = ['Prescriber','Vouchers','Total Claimed (RWF)']
+            st.dataframe(dr, use_container_width=True, height=260)
 
-        # Download
-        t1_buf = io.BytesIO()
-        _t1_xl = no_rec.copy()
-        _t1_xl["ph_date"] = pd.to_datetime(_t1_xl["ph_date"], errors="coerce").dt.strftime("%d/%m/%Y")
-        with pd.ExcelWriter(t1_buf, engine="openpyxl") as xw:
-            from openpyxl.styles import PatternFill as _PF, Font as _F, Alignment as _Al
-            _t1_xl.to_excel(xw, index=False, sheet_name="No Facility Record")
-            ws = xw.sheets["No Facility Record"]
-            hf = _PF("solid", fgColor="7F1D1D")
-            for cell in ws[1]:
-                cell.fill = hf
-                cell.font = _F(bold=True, color="FFFFFF", name="Arial", size=10)
-                cell.alignment = _Al(horizontal="center", wrap_text=True)
-            for i, r in enumerate(ws.iter_rows(min_row=2), 2):
-                bg = "FFE4E4" if i%2==0 else "FFFFFF"
-                for c in r: c.fill = _PF("solid", fgColor=bg)
-        t1_buf.seek(0)
-        st.download_button("⬇️ Download Table 1", t1_buf.getvalue(),
-            "table1_no_facility_record.xlsx",
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            key="dl_t1")
+        _b = io.BytesIO()
+        with pd.ExcelWriter(_b, engine='openpyxl') as _xw:
+            from openpyxl.styles import PatternFill as _PF,Font as _F,Alignment as _A
+            t1_show.to_excel(_xw, index=False, sheet_name='No Facility Record')
+            _ws=_xw.sheets['No Facility Record']
+            for _c in _ws[1]:
+                _c.fill=_PF('solid',fgColor='7F1D1D')
+                _c.font=_F(bold=True,color='FFFFFF',name='Arial',size=10)
+                _c.alignment=_A(horizontal='center',wrap_text=True)
+            for _i,_r in enumerate(_ws.iter_rows(min_row=2),2):
+                for _c in _r: _c.fill=_PF('solid',fgColor='FFE4E4' if _i%2==0 else 'FFFFFF')
+        _b.seek(0)
+        st.download_button('⬇️ Download Table 1 (.xlsx)', _b.getvalue(),
+            'table1_no_facility_record.xlsx',
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', key='dl1')
 
     st.markdown("<hr style='border-color:#1e2a38;margin:28px 0'>", unsafe_allow_html=True)
 
-    # ── TABLE 2: UNLINKED (RAMA found, visit not linked) ──────────────────────
+    # ── TABLE 2 — UNLINKED ────────────────────────────────────────────────────
     st.markdown(f"""
-<div class='fraud-card fraud-card-amber'>
+<div class='fd-card fd-amber'>
   <div style='display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px'>
     <div>
       <span style='font-size:16px;font-weight:800;color:#fbbf24;font-family:Syne,sans-serif'>
-        🟡 Table 2 — RAMA Found, Visit Not Linked
+        🟡 Table 2 — RAMA Found but Visit Not Linked
       </span>
       <span class='badge badge-amber' style='margin-left:10px'>{len(unlinked):,} vouchers</span>
-      <span class='badge badge-amber' style='margin-left:6px'>RWF {unlinked_ins:,.0f}</span>
+      <span class='badge badge-amber' style='margin-left:6px'>RWF {unlink_ins:,.0f}</span>
     </div>
     <span style='font-size:11px;color:#92400e;font-family:monospace'>
-      Patient exists in a facility file but dispensing date is outside the ±{date_window}-day window
+      Patient in facility records but outside ±{date_win}d or name below threshold
     </span>
   </div>
 </div>""", unsafe_allow_html=True)
 
     if not unlinked.empty:
-        t2c1, t2c2 = st.columns([2,1])
-        with t2c1:
-            t2_srch = st.text_input("🔍 Search", placeholder="Name, RAMA…", key="t2_srch")
-        with t2c2:
-            t2_max_gap = st.number_input("Max days apart to show", 1, 365, 60, key="t2_gap")
+        c1,c2 = st.columns([2.5,1.5])
+        with c1: t2s = st.text_input('🔍 Search', placeholder='Name, RAMA…', key='t2s')
+        with c2: t2g = st.number_input('Max days apart', 1, 365, 60, key='t2g')
 
-        t2_disp = unlinked.copy()
-        if t2_srch:
-            mask = t2_disp.apply(
-                lambda c: c.astype(str).str.contains(t2_srch, case=False, na=False)
-            ).any(axis=1)
-            t2_disp = t2_disp[mask]
-        if t2_max_gap:
-            t2_disp = t2_disp[
-                t2_disp["days_apart"].isna() | (t2_disp["days_apart"] <= t2_max_gap)
-            ]
+        t2 = unlinked.copy()
+        if t2s: t2 = t2[t2.apply(lambda c:c.astype(str).str.contains(t2s,case=False,na=False)).any(axis=1)]
+        t2 = t2[t2['days'].isna()|(t2['days']<=t2g)]
 
-        t2_show = t2_disp[[
-            "ph_voucher","ph_patient","ph_rama","ph_date","ph_ins",
-            "fac_name","fac_date","fac_source","days_apart","name_score"
-        ]].copy()
-        t2_show.columns = [
-            "Pharmacy Voucher","Pharmacy Patient","RAMA","Pharmacy Date","Insurance (RWF)",
-            "Facility Patient","Facility Visit Date","Facility","Days Apart","Name Score"
-        ]
-        for dcol in ["Pharmacy Date","Facility Visit Date"]:
-            t2_show[dcol] = pd.to_datetime(t2_show[dcol], errors="coerce").dt.strftime("%d/%m/%Y").fillna("—")
-        t2_show = t2_show.sort_values("Days Apart", na_position="last")
+        t2_show = pd.DataFrame({
+            'Voucher':           t2['ph_vou'],
+            'Pharmacy Patient':  t2['ph_name'],
+            'RAMA':              t2['ph_rama'],
+            'Pharmacy Date':     pd.to_datetime(t2['ph_date'],errors='coerce').dt.strftime('%d/%m/%Y').fillna('—'),
+            'Insurance RWF':     t2['ph_ins'],
+            'Hosp. Beneficiary': t2['h_bene'],
+            'Hosp. Affiliate':   t2['h_affil'],
+            'Facility Date':     pd.to_datetime(t2['h_date'],errors='coerce').dt.strftime('%d/%m/%Y').fillna('—'),
+            'Days Apart':        t2['days'],
+            'Name Score':        t2['score'],
+            'Matched Via':       t2['via'],
+            'Confidence':        t2['conf'],
+        }).sort_values('Days Apart', na_position='last')
         t2_show.index = range(1, len(t2_show)+1)
 
         st.markdown(
             f"<div style='font-size:11px;color:{MUTED};font-family:monospace;margin-bottom:6px'>"
-            f"Showing <b style='color:#fbbf24'>{len(t2_show):,}</b> vouchers · "
-            f"Insurance: <b style='color:#f59e0b'>RWF {t2_disp['ph_ins'].sum():,.0f}</b>"
-            f"</div>", unsafe_allow_html=True
-        )
-        st.dataframe(t2_show, use_container_width=True, height=300)
+            f"<b style='color:#fbbf24'>{len(t2_show):,}</b> vouchers · "
+            f"RWF: <b style='color:#f59e0b'>{t2['ph_ins'].sum():,.0f}</b></div>",
+            unsafe_allow_html=True)
+        st.dataframe(t2_show, use_container_width=True, height=320)
 
-        t2_buf = io.BytesIO()
-        _t2_xl = t2_disp.copy()
-        _t2_xl["ph_date"]  = pd.to_datetime(_t2_xl["ph_date"],  errors="coerce").dt.strftime("%d/%m/%Y")
-        _t2_xl["fac_date"] = pd.to_datetime(_t2_xl["fac_date"], errors="coerce").dt.strftime("%d/%m/%Y")
-        with pd.ExcelWriter(t2_buf, engine="openpyxl") as xw:
-            from openpyxl.styles import PatternFill as _PF, Font as _F, Alignment as _Al
-            _t2_xl.to_excel(xw, index=False, sheet_name="Unlinked Visits")
-            ws = xw.sheets["Unlinked Visits"]
-            for cell in ws[1]:
-                cell.fill = _PF("solid", fgColor="78350F")
-                cell.font = _F(bold=True, color="FFFFFF", name="Arial", size=10)
-                cell.alignment = _Al(horizontal="center", wrap_text=True)
-            for i, r in enumerate(ws.iter_rows(min_row=2), 2):
-                bg = "FEF3C7" if i%2==0 else "FFFFFF"
-                for c in r: c.fill = _PF("solid", fgColor=bg)
-        t2_buf.seek(0)
-        st.download_button("⬇️ Download Table 2", t2_buf.getvalue(),
-            "table2_unlinked_visits.xlsx",
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            key="dl_t2")
+        _b2 = io.BytesIO()
+        with pd.ExcelWriter(_b2, engine='openpyxl') as _xw:
+            from openpyxl.styles import PatternFill as _PF,Font as _F,Alignment as _A
+            t2_show.to_excel(_xw, index=False, sheet_name='Unlinked Visits')
+            _ws=_xw.sheets['Unlinked Visits']
+            for _c in _ws[1]:
+                _c.fill=_PF('solid',fgColor='78350F')
+                _c.font=_F(bold=True,color='FFFFFF',name='Arial',size=10)
+                _c.alignment=_A(horizontal='center',wrap_text=True)
+            for _i,_r in enumerate(_ws.iter_rows(min_row=2),2):
+                for _c in _r: _c.fill=_PF('solid',fgColor='FEF3C7' if _i%2==0 else 'FFFFFF')
+        _b2.seek(0)
+        st.download_button('⬇️ Download Table 2 (.xlsx)', _b2.getvalue(),
+            'table2_unlinked.xlsx',
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', key='dl2')
 
     st.markdown("<hr style='border-color:#1e2a38;margin:28px 0'>", unsafe_allow_html=True)
 
-    # ── TABLE 3: MATCHED (verified, informational) ────────────────────────────
+    # ── TABLE 3 — VERIFIED ────────────────────────────────────────────────────
     st.markdown(f"""
-<div class='fraud-card fraud-card-green'>
+<div class='fd-card fd-green'>
   <div style='display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px'>
     <div>
       <span style='font-size:16px;font-weight:800;color:#4ade80;font-family:Syne,sans-serif'>
-        ✅ Table 3 — Verified: Hospital Visit + Pharmacy Dispensing Linked
+        ✅ Table 3 — Verified: Visit Confirmed
       </span>
       <span class='badge badge-green' style='margin-left:10px'>{len(matched):,} vouchers</span>
-      <span class='badge badge-green' style='margin-left:6px'>RWF {matched_ins:,.0f}</span>
+      <span class='badge badge-green' style='margin-left:6px'>RWF {match_ins:,.0f}</span>
     </div>
     <span style='font-size:11px;color:#14532d;font-family:monospace'>
-      Legitimate patient journey confirmed — clinic visit → pharmacy dispensing
+      Legitimate journey confirmed — clinic visit linked to pharmacy dispensing
     </span>
   </div>
 </div>""", unsafe_allow_html=True)
 
-    with st.expander("View verified records (Table 3)", expanded=False):
-        t3_search = st.text_input("🔍 Search verified records", key="t3_srch")
-        t3_show = matched[[
-            "ph_voucher","ph_patient","ph_rama","ph_date","ph_ins",
-            "fac_voucher","fac_name","fac_date","fac_source","days_apart","name_score"
-        ]].copy()
-        t3_show.columns = [
-            "Pharmacy Voucher","Pharmacy Patient","RAMA","Pharmacy Date","Insurance (RWF)",
-            "Facility Voucher","Facility Patient","Facility Date","Facility","Days Apart","Name Score"
-        ]
-        for dcol in ["Pharmacy Date","Facility Date"]:
-            t3_show[dcol] = pd.to_datetime(t3_show[dcol], errors="coerce").dt.strftime("%d/%m/%Y").fillna("—")
-        if t3_search:
-            mask = t3_show.apply(
-                lambda c: c.astype(str).str.contains(t3_search, case=False, na=False)
-            ).any(axis=1)
-            t3_show = t3_show[mask]
-        t3_show = t3_show.sort_values("Days Apart").reset_index(drop=True)
-        t3_show.index = t3_show.index + 1
-        st.dataframe(t3_show, use_container_width=True, height=300)
+    with st.expander('View verified records', expanded=False):
+        if not matched.empty:
+            cc = matched['conf'].value_counts()
+            mc1,mc2,mc3 = st.columns(3)
+            mc1.metric('🟢 HIGH confidence',   cc.get('HIGH',0))
+            mc2.metric('🟡 MEDIUM confidence', cc.get('MEDIUM',0))
+            mc3.metric('🔴 LOW confidence',    cc.get('LOW',0))
+
+        t3s = st.text_input('🔍 Search verified', key='t3s')
+        t3 = matched.copy()
+        if t3s: t3 = t3[t3.apply(lambda c:c.astype(str).str.contains(t3s,case=False,na=False)).any(axis=1)]
+
+        t3_show = pd.DataFrame({
+            'Voucher':           t3['ph_vou'],
+            'Pharmacy Patient':  t3['ph_name'],
+            'RAMA':              t3['ph_rama'],
+            'Pharmacy Date':     pd.to_datetime(t3['ph_date'],errors='coerce').dt.strftime('%d/%m/%Y').fillna('—'),
+            'Insurance RWF':     t3['ph_ins'],
+            'Hosp. Beneficiary': t3['h_bene'],
+            'Hosp. Affiliate':   t3['h_affil'],
+            'Facility Date':     pd.to_datetime(t3['h_date'],errors='coerce').dt.strftime('%d/%m/%Y').fillna('—'),
+            'Fac. Voucher':      t3['h_vou'],
+            'Days Apart':        t3['days'],
+            'Name Score':        t3['score'],
+            'Matched Via':       t3['via'],
+            'Confidence':        t3['conf'],
+            'Facility':          t3['h_src'],
+        }).sort_values('Days Apart').reset_index(drop=True)
+        t3_show.index = t3_show.index+1
+        st.dataframe(t3_show, use_container_width=True, height=320)
 
     st.markdown("<hr style='border-color:#1e2a38;margin:28px 0'>", unsafe_allow_html=True)
 
-    # ── FULL REPORT DOWNLOAD ──────────────────────────────────────────────────
-    st.markdown('<div class="sec-head">⬇️ Download Full Fraud Detection Report</div>',
+    # ── Full report ───────────────────────────────────────────────────────────
+    st.markdown('<div class="sec-head">⬇️ Full Fraud Detection Report</div>',
                 unsafe_allow_html=True)
 
-    if st.button("📊 Generate Full Report (4 sheets)", type="primary", key="fd_gen"):
+    if st.button('📊 Generate Full Report (4 sheets)', type='primary', key='fd_gen'):
         from openpyxl import Workbook as _WB
-        from openpyxl.styles import (PatternFill as _PF, Font as _F,
-                                     Alignment as _Al, Border as _B, Side as _S)
+        from openpyxl.styles import (PatternFill as _PF,Font as _F,
+                                     Alignment as _AL,Border as _BD,Side as _SD)
         from openpyxl.utils import get_column_letter as _gcl
 
-        wb = _WB(); wb.remove(wb.active)
-        THIN = _S(border_style="thin", color="CCCCCC")
-        BDR  = _B(left=THIN,right=THIN,top=THIN,bottom=THIN)
+        _wb=_WB(); _wb.remove(_wb.active)
+        _TH=_SD(border_style='thin',color='CCCCCC')
+        _BDR=_BD(left=_TH,right=_TH,top=_TH,bottom=_TH)
 
-        def _make_sheet(wb, title, data_df, hdr_color, row_colors):
-            ws = wb.create_sheet(title)
-            for ci, col in enumerate(data_df.columns, 1):
-                c = ws.cell(1, ci, col)
-                c.fill = _PF("solid", fgColor=hdr_color)
-                c.font = _F(bold=True, color="FFFFFF", name="Arial", size=10)
-                c.alignment = _Al(horizontal="center", wrap_text=True)
-                c.border = BDR
-                ws.column_dimensions[_gcl(ci)].width = max(14, min(len(str(col))+4, 35))
-            ws.row_dimensions[1].height = 30
-            ws.freeze_panes = "A2"
-            for ri, (_, row) in enumerate(data_df.iterrows(), 2):
-                bg = row_colors[ri % len(row_colors)]
-                for ci, val in enumerate(row, 1):
-                    v = "" if (isinstance(val, float) and math.isnan(val)) else val
-                    c = ws.cell(ri, ci, v)
-                    c.font = _F(name="Arial", size=10)
-                    c.fill = _PF("solid", fgColor=bg)
-                    c.border = BDR
-                    c.alignment = _Al(horizontal="left")
-            return ws
+        def _fmtd(s):
+            return pd.to_datetime(s,errors='coerce').dt.strftime('%d/%m/%Y').fillna('')
 
-        # Sheet 0: Summary
-        ws0 = wb.create_sheet("Summary")
-        ws0.sheet_view.showGridLines = False
-        summary_data = [
-            ("Pharmacy Report Period", "January 2025"),
-            ("Total Pharmacy Vouchers", len(ph_work)),
-            ("Facilities Loaded", fac_count),
-            ("", ""),
-            ("✅ Verified (visit found)", len(matched)),
-            ("   % of vouchers", f"{100*len(matched)/len(ph_work):.1f}%"),
-            ("   Insurance amount (RWF)", matched_ins),
-            ("", ""),
-            ("🔴 No Facility Record", len(no_rec)),
-            ("   % of vouchers", f"{100*len(no_rec)/len(ph_work):.1f}%"),
-            ("   Insurance at risk (RWF)", no_rec_ins),
-            ("", ""),
-            ("🟡 RAMA Found, Visit Unlinked", len(unlinked)),
-            ("   % of vouchers", f"{100*len(unlinked)/len(ph_work):.1f}%"),
-            ("   Insurance (RWF)", unlinked_ins),
-            ("", ""),
-            ("TOTAL INSURANCE AT RISK (RWF)", at_risk_ins),
-            ("As % of total claims", f"{100*at_risk_ins/total_ins:.1f}%"),
+        def _sht(wb,title,data,hcol,evencol,oddcol='FFFFFF'):
+            ws=wb.create_sheet(title)
+            for ci,col in enumerate(data.columns,1):
+                c=ws.cell(1,ci,col)
+                c.fill=_PF('solid',fgColor=hcol)
+                c.font=_F(bold=True,color='FFFFFF',name='Arial',size=10)
+                c.alignment=_AL(horizontal='center',wrap_text=True)
+                c.border=_BDR
+                ws.column_dimensions[_gcl(ci)].width=max(14,min(len(str(col))+4,36))
+            ws.row_dimensions[1].height=30; ws.freeze_panes='A2'
+            for ri,(_,row) in enumerate(data.iterrows(),2):
+                bg=evencol if ri%2==0 else oddcol
+                for ci,val in enumerate(row,1):
+                    v='' if isinstance(val,float) and math.isnan(val) else val
+                    c=ws.cell(ri,ci,v)
+                    c.font=_F(name='Arial',size=10)
+                    c.fill=_PF('solid',fgColor=bg)
+                    c.border=_BDR; c.alignment=_AL(horizontal='left')
+
+        # Summary
+        _ws0=_wb.create_sheet('Summary'); _ws0.sheet_view.showGridLines=False
+        _rws=[
+            ('Report Period','January 2025'),
+            ('Pharmacy Vouchers',len(ph)),
+            ('Facilities Loaded',fac['_src'].nunique()),
+            ('Facility RAMA Numbers',len(fac_ramas)),
+            ('',''),
+            ('✅ VERIFIED',len(matched)),
+            ('   % of vouchers',f"{100*len(matched)/max(len(ph),1):.1f}%"),
+            ('   Insurance RWF',match_ins),
+            ('',''),
+            ('🟡 UNLINKED (RAMA found, no date/name link)',len(unlinked)),
+            ('   % of vouchers',f"{100*len(unlinked)/max(len(ph),1):.1f}%"),
+            ('   Insurance RWF',unlink_ins),
+            ('',''),
+            ('🔴 NO FACILITY RECORD',len(no_rec)),
+            ('   % of vouchers',f"{100*len(no_rec)/max(len(ph),1):.1f}%"),
+            ('   Insurance RWF',norec_ins),
+            ('',''),
+            ('TOTAL AT RISK (RWF)',norec_ins+unlink_ins),
+            ('As % of total claims',f"{100*(norec_ins+unlink_ins)/max(total_ins,1):.1f}%"),
         ]
-        for ri, (label, val) in enumerate(summary_data, 2):
-            lc = ws0.cell(ri, 1, label)
-            vc = ws0.cell(ri, 2, val)
-            lc.font = _F(name="Arial", size=11, bold=("TOTAL" in str(label) or "%" not in str(label) and str(label).startswith(("✅","🔴","🟡","Pharmacy","Facilities"))))
-            vc.font = _F(name="Arial", size=11, bold="TOTAL" in str(label))
-            if "TOTAL" in str(label):
-                lc.fill = _PF("solid", fgColor="7F1D1D")
-                vc.fill = _PF("solid", fgColor="7F1D1D")
-                lc.font = _F(name="Arial", size=12, bold=True, color="FFFFFF")
-                vc.font = _F(name="Arial", size=12, bold=True, color="FFFFFF")
-        ws0.column_dimensions["A"].width = 38
-        ws0.column_dimensions["B"].width = 22
+        for ri,(lbl,val) in enumerate(_rws,2):
+            lc=_ws0.cell(ri,1,lbl); vc=_ws0.cell(ri,2,val)
+            is_t='TOTAL' in str(lbl).upper()
+            lc.font=_F(name='Arial',size=11,bold=is_t or str(lbl).startswith(('✅','🟡','🔴','Report','Facil')))
+            vc.font=_F(name='Arial',size=11,bold=is_t)
+            if is_t:
+                for c in(lc,vc):
+                    c.fill=_PF('solid',fgColor='7F1D1D')
+                    c.font=_F(name='Arial',size=12,bold=True,color='FFFFFF')
+        _ws0.column_dimensions['A'].width=46; _ws0.column_dimensions['B'].width=22
 
-        # Sheet 1: No record
-        def _fmt_date(s):
-            return pd.to_datetime(s, errors="coerce").dt.strftime("%d/%m/%Y").fillna("")
-        t1_xl = no_rec[["ph_voucher","ph_patient","ph_rama","ph_date","ph_ins","ph_total","ph_doctor","ph_dept"]].copy()
-        t1_xl.columns = ["Voucher","Patient Name","RAMA Number","Dispensing Date","Insurance (RWF)","Total Cost (RWF)","Prescriber","Specialty"]
-        t1_xl["Dispensing Date"] = _fmt_date(t1_xl["Dispensing Date"])
-        _make_sheet(wb, "1 - No Facility Record", t1_xl, "7F1D1D", ["FFE4E4","FFFFFF"])
+        # Sheet 1
+        _d1=no_rec[['ph_vou','ph_name','ph_rama','ph_date','ph_ins','ph_tot','ph_doc','ph_dpt']].copy()
+        _d1.columns=['Voucher','Patient Name','RAMA','Dispensing Date','Insurance RWF','Total RWF','Prescriber','Specialty']
+        _d1['Dispensing Date']=_fmtd(_d1['Dispensing Date'])
+        _sht(_wb,'1 - No Facility Record',_d1,'7F1D1D','FFE4E4')
 
-        # Sheet 2: Unlinked
-        t2_xl = unlinked[["ph_voucher","ph_patient","ph_rama","ph_date","ph_ins","fac_name","fac_date","fac_source","days_apart","name_score"]].copy()
-        t2_xl.columns = ["Voucher","Patient Name","RAMA","Pharmacy Date","Insurance (RWF)","Facility Patient","Facility Date","Facility","Days Apart","Name Score"]
-        t2_xl["Pharmacy Date"] = _fmt_date(t2_xl["Pharmacy Date"])
-        t2_xl["Facility Date"] = _fmt_date(t2_xl["Facility Date"])
-        _make_sheet(wb, "2 - Unlinked Visits", t2_xl, "78350F", ["FEF3C7","FFFFFF"])
+        # Sheet 2
+        _d2=unlinked[['ph_vou','ph_name','ph_rama','ph_date','ph_ins','h_bene','h_affil','h_date','h_src','days','score','via','conf']].copy()
+        _d2.columns=['Voucher','Patient','RAMA','Pharmacy Date','Insurance RWF','Hosp. Beneficiary','Hosp. Affiliate','Facility Date','Facility','Days Apart','Name Score','Matched Via','Confidence']
+        _d2['Pharmacy Date']=_fmtd(_d2['Pharmacy Date']); _d2['Facility Date']=_fmtd(_d2['Facility Date'])
+        _sht(_wb,'2 - Unlinked Visits',_d2,'78350F','FEF3C7')
 
-        # Sheet 3: Verified
-        t3_xl = matched[["ph_voucher","ph_patient","ph_rama","ph_date","ph_ins","fac_voucher","fac_name","fac_date","fac_source","days_apart","name_score"]].copy()
-        t3_xl.columns = ["Voucher","Patient Name","RAMA","Pharmacy Date","Insurance (RWF)","Facility Voucher","Facility Patient","Facility Date","Facility","Days Apart","Name Score"]
-        t3_xl["Pharmacy Date"] = _fmt_date(t3_xl["Pharmacy Date"])
-        t3_xl["Facility Date"] = _fmt_date(t3_xl["Facility Date"])
-        _make_sheet(wb, "3 - Verified", t3_xl, "14532D", ["E7F5EC","FFFFFF"])
+        # Sheet 3
+        _d3=matched[['ph_vou','ph_name','ph_rama','ph_date','ph_ins','h_vou','h_bene','h_affil','h_date','h_src','days','score','via','conf']].copy()
+        _d3.columns=['Voucher','Patient','RAMA','Pharmacy Date','Insurance RWF','Fac. Voucher','Hosp. Beneficiary','Hosp. Affiliate','Facility Date','Facility','Days Apart','Name Score','Matched Via','Confidence']
+        _d3['Pharmacy Date']=_fmtd(_d3['Pharmacy Date']); _d3['Facility Date']=_fmtd(_d3['Facility Date'])
+        _sht(_wb,'3 - Verified',_d3,'14532D','E7F5EC')
 
-        buf = io.BytesIO(); wb.save(buf); buf.seek(0)
-        st.success("✅ Full report ready!")
+        _buf=io.BytesIO(); _wb.save(_buf); _buf.seek(0)
+        st.success('✅ Report ready!')
         st.download_button(
-            "⬇️ Download Full Fraud Detection Report (.xlsx)",
-            buf.getvalue(), "fraud_detection_report.xlsx",
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            key="dl_full_fd"
-        )
+            '⬇️ Download Full Fraud Detection Report (.xlsx)',
+            _buf.getvalue(), 'fraud_detection_report.xlsx',
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            key='dl_full')
