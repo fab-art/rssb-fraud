@@ -154,7 +154,38 @@ def load_and_process(file_bytes: bytes, filename: str, rapid_days: int):
     if fname.endswith(".csv"):
         df = pd.read_csv(io.BytesIO(file_bytes), encoding="utf-8", on_bad_lines="skip")
     elif fname.endswith((".xlsx", ".xls")):
-        df = pd.read_excel(io.BytesIO(file_bytes))
+        # ── Smart sheet + header detection ────────────────────────────────────
+        _xl = pd.ExcelFile(io.BytesIO(file_bytes))
+        # Prefer sheets that look like data sheets (keyword priority list)
+        _chosen = None
+        for _prio in ['after', 'dispensing', 'voucher', 'verified', 'data',
+                      'clean', 'invoice', 'before', 'report']:
+            for _sn in _xl.sheet_names:
+                if _prio in _sn.lower():
+                    _chosen = _sn; break
+            if _chosen: break
+        if not _chosen:
+            # Fall back to the largest sheet
+            _sizes = {}
+            for _sn in _xl.sheet_names:
+                try: _sizes[_sn] = _xl.parse(_sn, header=None).shape[0]
+                except: pass
+            _chosen = max(_sizes, key=_sizes.get) if _sizes else _xl.sheet_names[0]
+        # Detect actual header row (skip blank/title rows at the top)
+        _raw_t = pd.read_excel(io.BytesIO(file_bytes), sheet_name=_chosen, header=None)
+        _HKEYS = ['paper code', 'dispensing', 'patient name', 'patient id',
+                  'rama', 'voucher', 'date', 'amount', 'doctor', 'prescriber',
+                  'medicine', 'drug', 'quantity', 'affil', 'benefi', 'member']
+        _hrow = 0
+        for _i, _row in _raw_t.head(25).iterrows():
+            _nonnull = [str(v).lower() for v in _row if pd.notna(v)]
+            # A real header row has multiple non-null cells AND at least 2 keywords
+            if len(_nonnull) >= 3:
+                _joined = ' '.join(_nonnull)
+                if sum(1 for _k in _HKEYS if _k in _joined) >= 2:
+                    _hrow = _i; break
+        df = pd.read_excel(io.BytesIO(file_bytes), sheet_name=_chosen, header=_hrow)
+        # ── End smart detection ───────────────────────────────────────────────
     elif fname.endswith(".ods"):
         df = pd.read_excel(io.BytesIO(file_bytes), engine="odf")
     else:
@@ -2587,12 +2618,17 @@ with tab_xfac:
                 chosen = max(sizes, key=sizes.get)
 
             raw0 = xl.parse(chosen, header=None)
-            # Detect header row
+            # Detect header row — require ≥3 non-null cells to avoid
+            # picking a merged title cell as the header row
             hrow = 0
-            for i, row in raw0.head(20).iterrows():
-                joined = ' '.join(str(v).lower() for v in row if pd.notna(v))
-                if any(k in joined for k in ['affil','benefi','patient name','voucher']):
-                    hrow = i; break
+            for i, row in raw0.head(25).iterrows():
+                nonnull = [str(v).lower() for v in row if pd.notna(v)]
+                if len(nonnull) >= 3:
+                    joined = ' '.join(nonnull)
+                    if any(k in joined for k in ['affil','benefi','patient name',
+                                                  'voucher','paper code','rama',
+                                                  'member','dispensing']):
+                        hrow = i; break
             if hrow > 0:
                 raw = pd.read_excel(io.BytesIO(raw_bytes),
                                     sheet_name=chosen, header=hrow)
