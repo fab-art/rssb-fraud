@@ -2265,7 +2265,7 @@ with tab_cv:
                     "paper_code":  pc,
                     "rama_no":     rama,
                     "patient":     r["_pat"],
-                    "amount":      r["_dif"],  # negative = deducted amount
+                    "amount":      -abs(r["_dif"]),  # always negative regardless of source sign
                     "explanation": r["_obs"],
                     "ins_copay":   r["_ins"],
                     "total_cost":  r["_tot"],
