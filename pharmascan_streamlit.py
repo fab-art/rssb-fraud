@@ -1138,8 +1138,9 @@ def generate_counter_verification_xlsx(
         expla      = str(ded["explanation"]).strip()  if is_ded else ""
         verified   = "NO" if is_ded else "YES"
 
+        # ded_amount is negative (e.g. -11342); use abs for arithmetic
         total_85  = round(ins_co * 0.85, 2)
-        after_100 = round(ins_co - ded_amount, 2)
+        after_100 = round(ins_co - abs(ded_amount), 2)
         after_85  = round(after_100 * 0.85, 2)
 
         row_vals = [
@@ -1178,7 +1179,7 @@ def generate_counter_verification_xlsx(
                 c.number_format = "#,##0.00"
                 c.alignment     = A_RIGHT
             elif ci == 13:  # M — Amount Deducted
-                c.font          = FONT_RED if ded_amount > 0 else FONT_DATA
+                c.font          = FONT_RED if ded_amount != 0 else FONT_DATA
                 c.fill          = row_fill
                 c.number_format = "#,##0.00"
                 c.alignment     = A_RIGHT
@@ -1349,7 +1350,7 @@ def generate_counter_verification_xlsx(
             elif ci == 4:
                 c.font          = FONT_DR
                 c.border        = border_data()
-                c.number_format = "#,##0"
+                c.number_format = "#,##0;-#,##0"
                 c.alignment     = A_RIGHT
             elif ci == 5:
                 c.font      = FONT_D2
@@ -1383,7 +1384,7 @@ def generate_counter_verification_xlsx(
              value="TOTAL AMOUNT DEDUCTED").alignment = A_RIGHT
     tot_c = ws2.cell(row=tot_row, column=4,
                      value=f"=SUM(D{data_start}:D{tot_row - 1})")
-    tot_c.number_format = "#,##0"
+    tot_c.number_format = "#,##0;-#,##0"
     tot_c.alignment     = A_RIGHT
 
     # ── Signature block ───────────────────────────────────────────────────────
@@ -2264,7 +2265,7 @@ with tab_cv:
                     "paper_code":  pc,
                     "rama_no":     rama,
                     "patient":     r["_pat"],
-                    "amount":      abs(r["_dif"]),  # always positive in the report
+                    "amount":      r["_dif"],  # negative = deducted amount
                     "explanation": r["_obs"],
                     "ins_copay":   r["_ins"],
                     "total_cost":  r["_tot"],
