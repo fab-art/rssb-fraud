@@ -1314,30 +1314,25 @@ def generate_counter_verification_xlsx(
     # B,C: h=left v=center wrap, thin/AAA all
     # D: h=right v=center no-wrap, color=red C0392B, numfmt=#,##0, thin/AAA all
     # E: h=left v=top wrap, bL=thin/AAA, bR=thin/?, bT=thin/AAA, bBot=thin/AAA
-    MIN_ROWS   = 11
     n_ded      = len(deductions)
-    n_rows     = max(n_ded, MIN_ROWS)
+    n_rows     = n_ded          # rows grow with data — no padding
     data_start = 12
 
     FONT_D2 = _font("Aptos Narrow", bold=False, size=10.5, color=C_TEXT)
     FONT_DR = _font("Aptos Narrow", bold=False, size=10.5, color=C_RED)
 
-    for i in range(n_rows):
+    for i, d in enumerate(deductions):
         ri = data_start + i
         ws2.row_dimensions[ri].height = 18.0
         row_fill = fill(C_WHITE) if i % 2 == 0 else fill(C_GREY)
 
-        if i < n_ded:
-            d = deductions[i]
-            vals = [
-                i + 1,
-                str(d.get("paper_code",  "")),
-                str(d.get("rama_no",     "")),
-                _safe_float(d.get("amount", 0)),
-                str(d.get("explanation", "")),
-            ]
-        else:
-            vals = [None, None, None, None, None]
+        vals = [
+            i + 1,
+            str(d.get("paper_code",  "")),
+            str(d.get("rama_no",     "")),
+            _safe_float(d.get("amount", 0)),
+            str(d.get("explanation", "")),
+        ]
 
         for ci, val in enumerate(vals, 1):
             c = ws2.cell(row=ri, column=ci, value=val)
@@ -2064,14 +2059,37 @@ with tab_cv:
                         pass
 
                 # Prefer sheet whose columns contain "difference" or "observation"
+                # AND whose difference column contains meaningful deduction amounts
+                # (not just tiny rounding artifacts < 100 RWF).
                 def score_sheet(df_):
                     cols = " ".join(df_.columns.astype(str).str.lower())
-                    return ("diff" in cols or "observ" in cols or "remark" in cols)
+                    if not ("diff" in cols or "observ" in cols or "remark" in cols):
+                        return False
+                    # Validate: difference column must have at least one value > 100
+                    # to distinguish real deductions from rounding artifacts
+                    for col in df_.columns:
+                        if re.search(r"diff|deduct|deduit", str(col).lower()):
+                            vals = pd.to_numeric(df_[col], errors="coerce").dropna()
+                            if len(vals) > 0 and vals.abs().max() > 100:
+                                return True
+                    # Has "observ"/"remark" column but no meaningful difference values —
+                    # could still be a valid annotated sheet if observation is non-empty
+                    for col in df_.columns:
+                        if re.search(r"observ|remark|reason|explan", str(col).lower()):
+                            non_blank = df_[col].dropna()
+                            non_blank = non_blank[non_blank.astype(str).str.strip() != ""]
+                            if len(non_blank) > 0:
+                                return True
+                    return False
 
                 preferred = next(
                     ((sn, d) for sn, d in sheet_candidates if score_sheet(d)),
-                    sheet_candidates[0] if sheet_candidates else (None, None)
+                    None
                 )
+                # If no sheet passed validation, fall back to largest sheet by row count
+                if preferred is None:
+                    preferred = max(sheet_candidates, key=lambda x: len(x[1]),
+                                    default=(None, None))
                 chosen_sheet, raw_ann = preferred
 
             # ── Auto-detect columns ──────────────────────────────────────
@@ -2107,6 +2125,42 @@ with tab_cv:
                 "doctor":      _find_col([r"practitioner", r"prescriber", r"doctor",
                                           r"medecin"]),
             }
+
+            # ── Warn if file looks like a raw (un-annotated) voucher report ──
+            _diff_col = detected.get("difference")
+            _obs_col  = detected.get("observation")
+            _has_real_diffs = False
+            _has_real_obs   = False
+            if _diff_col and _diff_col in raw_ann.columns:
+                _diff_vals = pd.to_numeric(raw_ann[_diff_col], errors="coerce").dropna()
+                _has_real_diffs = len(_diff_vals) > 0 and _diff_vals.abs().max() > 100
+            if _obs_col and _obs_col in raw_ann.columns:
+                _obs_vals = raw_ann[_obs_col].dropna()
+                _obs_vals = _obs_vals[_obs_vals.astype(str).str.strip() != ""]
+                _has_real_obs = len(_obs_vals) > 0
+
+            if not _diff_col and not _obs_col:
+                st.warning(
+                    "⚠️ No **Difference** or **Observation** columns detected in this file. "
+                    "This looks like a raw voucher report that hasn't been annotated yet. "
+                    "Please add a **Difference** column (deduction amount in RWF) and an "
+                    "**Observation** column (reason for deduction) to each deducted row, "
+                    "then re-upload."
+                )
+            elif _diff_col and not _has_real_diffs:
+                st.warning(
+                    f"⚠️ The detected **Difference** column (*{_diff_col}*) contains only "
+                    f"very small values (< 100 RWF). This is likely a rounding artifact, "
+                    f"not real counter-verification deductions. "
+                    f"Please fill in the actual deduction amounts (e.g. 20,000 RWF) "
+                    f"in that column before generating the report."
+                )
+            if _diff_col and _has_real_diffs and not _has_real_obs:
+                st.warning(
+                    f"⚠️ The **Observation** column (*{_obs_col or 'not found'}*) is empty. "
+                    f"No deduction reasons will appear in the report. "
+                    f"Please fill in the reason for each deduction."
+                )
 
             st.session_state["ann_df"]       = raw_ann
             st.session_state["ann_detected"] = detected
@@ -2184,7 +2238,15 @@ with tab_cv:
             ann_work["_pat"] = (ann_work[sel_pat].fillna("").astype(str).str.strip()
                                 if sel_pat != "(none)" else "")
 
-            deducted_rows = ann_work[ann_work["_dif"] > 0].copy()
+            # Identify real deduction rows.
+            # Handles both sign conventions (positive or negative = deducted).
+            # Keeps a row when EITHER:
+            #   • |difference| >= 100 RWF  (meaningful amount even if no note), OR
+            #   • observation is non-blank  (annotated by verifier, even if small)
+            # This discards sub-100-RWF rounding artifacts that have no annotation.
+            _has_obs   = ann_work["_obs"].str.strip() != ""
+            _big_amt   = ann_work["_dif"].abs() >= 100
+            deducted_rows = ann_work[_big_amt | _has_obs].copy()
 
             # Pull RAMA from main loaded df if possible
             rama_lookup = {}
@@ -2202,7 +2264,7 @@ with tab_cv:
                     "paper_code":  pc,
                     "rama_no":     rama,
                     "patient":     r["_pat"],
-                    "amount":      r["_dif"],
+                    "amount":      abs(r["_dif"]),  # always positive in the report
                     "explanation": r["_obs"],
                     "ins_copay":   r["_ins"],
                     "total_cost":  r["_tot"],
