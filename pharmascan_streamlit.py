@@ -3290,6 +3290,33 @@ with tab_xfac:
         require_name = st.checkbox("Require name match", value=True,
             help="If OFF, matches on RAMA number alone (catches name typos)")
 
+    cfg4, cfg5 = st.columns(2)
+    with cfg4:
+        fuzzy_rama_enabled = st.checkbox(
+            "🔀 Fuzzy RAMA fallback (name-only match)",
+            value=True,
+            help=(
+                "When a pharmacy RAMA number is NOT found in any facility file, "
+                "the app will still search facility records by patient name. "
+                "If a name match is found above the threshold below (even though the "
+                "RAMA numbers differ), the record is flagged as 'Visit Not Linked — "
+                "RAMA Mismatch' rather than 'No Hospital Record'. "
+                "This catches data-entry errors, affiliate-number swaps, and "
+                "cases where the same person appears under two different RAMA codes."
+            ),
+        )
+    with cfg5:
+        fuzzy_rama_thresh = st.slider(
+            "Name threshold for RAMA fallback (0–1)",
+            0.0, 1.0, 0.5, 0.05,
+            disabled=not fuzzy_rama_enabled,
+            help=(
+                "Minimum token-overlap score between the pharmacy patient name and "
+                "a facility patient name before a RAMA-mismatch record is moved from "
+                "'No Record' → 'Visit Not Linked'. Raise this to reduce false positives."
+            ),
+        )
+
     # ── Build pharmacy working set ────────────────────────────────────────────
     def _ph_col(*keys):
         for k in keys:
@@ -3319,8 +3346,20 @@ with tab_xfac:
         ta = set(str(a).upper().split()); tb = set(str(b).upper().split())
         return len(ta & tb) / len(ta | tb) if ta and tb else 0.0
 
+    # ── Pre-build a normalised name index for fuzzy-RAMA fallback ─────────────
+    # We keep a lightweight list of (norm_name, row_iloc) so we can scan by name
+    # without re-normalising on every iteration.
+    if fuzzy_rama_enabled:
+        _fac_names_norm = fac_df["_name"].str.upper().str.strip().tolist()
+    else:
+        _fac_names_norm = []
+
     # ── Core matching ─────────────────────────────────────────────────────────
-    # For each pharmacy row, find best facility match by RAMA + name + date
+    # For each pharmacy row, find best facility match by RAMA + name + date.
+    # New step: when exact RAMA lookup fails, try a name-only fuzzy search across
+    # ALL facility records.  A hit here means the same person may have been
+    # registered under a different RAMA/affiliate number → flag as UNLINKED
+    # (RAMA_MISMATCH) instead of NO_RECORD, which is a softer, more accurate flag.
     results = []
     for _, pr in ph_work.iterrows():
         rama     = pr["_rama"]
@@ -3330,21 +3369,57 @@ with tab_xfac:
         fac_rows = fac_df[fac_df["_rama"] == rama]
 
         if fac_rows.empty:
-            # NO facility record for this RAMA at all
-            results.append({
-                "status": "NO_RECORD",
-                "ph_voucher": pr["_vou"],
-                "ph_patient": ph_name,
-                "ph_rama":    rama,
-                "ph_date":    ph_date,
-                "ph_ins":     pr["_ins"],
-                "ph_total":   pr["_tot"],
-                "ph_doctor":  pr["_doc"],
-                "ph_dept":    pr["_dpt"],
-                "fac_voucher": None, "fac_name": None,
-                "fac_date":    None, "fac_source": None,
-                "days_apart":  None, "name_score": None,
-            })
+            # ── Fuzzy-RAMA fallback: scan facility by name ─────────────────
+            fuzzy_hit = None
+            fuzzy_score = 0.0
+            if fuzzy_rama_enabled and ph_name.strip():
+                ph_name_up = ph_name.upper().strip()
+                for idx, fn in enumerate(_fac_names_norm):
+                    sc = _tok(ph_name_up, fn)
+                    if sc > fuzzy_score:
+                        fuzzy_score = sc
+                        if sc >= fuzzy_rama_thresh:
+                            fuzzy_hit = fac_df.iloc[idx]
+
+            if fuzzy_hit is not None:
+                # Name matches a facility record but RAMA numbers differ
+                # → UNLINKED with RAMA_MISMATCH note (softer than NO_RECORD)
+                fac_hit_date = fuzzy_hit["_date"]
+                nearest_d = None
+                if pd.notna(ph_date) and pd.notna(fac_hit_date):
+                    nearest_d = int(abs((ph_date - fac_hit_date).days))
+                results.append({
+                    "status":      "UNLINKED",
+                    "_note":       "RAMA_MISMATCH",
+                    "ph_voucher":  pr["_vou"],        "ph_patient": ph_name,
+                    "ph_rama":     rama,               "ph_date":    ph_date,
+                    "ph_ins":      pr["_ins"],         "ph_total":   pr["_tot"],
+                    "ph_doctor":   pr["_doc"],         "ph_dept":    pr["_dpt"],
+                    "fac_voucher": fuzzy_hit["voucher_id"],
+                    "fac_name":    fuzzy_hit["_name"],
+                    "fac_rama":    fuzzy_hit["_rama"],
+                    "fac_date":    fac_hit_date,
+                    "fac_source":  fuzzy_hit["_source"],
+                    "days_apart":  nearest_d,
+                    "name_score":  round(fuzzy_score, 2),
+                })
+            else:
+                # Truly no facility record — neither RAMA nor name matches
+                results.append({
+                    "status":      "NO_RECORD",
+                    "_note":       "",
+                    "ph_voucher":  pr["_vou"],
+                    "ph_patient":  ph_name,
+                    "ph_rama":     rama,
+                    "ph_date":     ph_date,
+                    "ph_ins":      pr["_ins"],
+                    "ph_total":    pr["_tot"],
+                    "ph_doctor":   pr["_doc"],
+                    "ph_dept":     pr["_dpt"],
+                    "fac_voucher": None, "fac_name":   None, "fac_rama": None,
+                    "fac_date":    None, "fac_source": None,
+                    "days_apart":  None, "name_score": None,
+                })
             continue
 
         # RAMA exists — check name + date
@@ -3362,11 +3437,13 @@ with tab_xfac:
             # MATCHED — legitimate dispensing with traced visit
             results.append({
                 "status":      "MATCHED",
+                "_note":       "",
                 "ph_voucher":  pr["_vou"],   "ph_patient": ph_name,
                 "ph_rama":     rama,          "ph_date":    ph_date,
                 "ph_ins":      pr["_ins"],    "ph_total":   pr["_tot"],
                 "ph_doctor":   pr["_doc"],    "ph_dept":    pr["_dpt"],
                 "fac_voucher": best["voucher_id"], "fac_name": best["_name"],
+                "fac_rama":    best["_rama"],
                 "fac_date":    best["_date"],      "fac_source": best["_source"],
                 "days_apart":  best_delta,    "name_score": round(best_score, 2),
             })
@@ -3380,11 +3457,13 @@ with tab_xfac:
             best_fr = fac_rows.iloc[0]
             results.append({
                 "status":      "UNLINKED",
+                "_note":       "DATE_MISMATCH",
                 "ph_voucher":  pr["_vou"],   "ph_patient": ph_name,
                 "ph_rama":     rama,          "ph_date":    ph_date,
                 "ph_ins":      pr["_ins"],    "ph_total":   pr["_tot"],
                 "ph_doctor":   pr["_doc"],    "ph_dept":    pr["_dpt"],
                 "fac_voucher": best_fr["voucher_id"], "fac_name": best_fr["_name"],
+                "fac_rama":    best_fr["_rama"],
                 "fac_date":    best_fr["_date"],      "fac_source": best_fr["_source"],
                 "days_apart":  nearest_d,     "name_score": round(_tok(ph_name, best_fr["_name"]),2),
             })
@@ -3417,7 +3496,7 @@ with tab_xfac:
               f"{len(no_rec):,}",
               f"-{100*len(no_rec)/len(ph_work):.1f}%",
               delta_color="inverse")
-    k4.metric("🟡 RAMA found, visit unlinked",
+    k4.metric("🟡 Visit not linked",
               f"{len(unlinked):,}",
               f"-{100*len(unlinked)/len(ph_work):.1f}%",
               delta_color="inverse")
@@ -3481,7 +3560,7 @@ with tab_xfac:
       <span class='badge badge-red' style='margin-left:6px'>RWF {no_rec_ins:,.0f}</span>
     </div>
     <span style='font-size:11px;color:#991b1b;font-family:monospace'>
-      Patient's RAMA number not found in ANY uploaded facility file
+      Patient's RAMA number AND name not found in ANY uploaded facility file
     </span>
   </div>
 </div>""", unsafe_allow_html=True)
@@ -3567,28 +3646,49 @@ with tab_xfac:
     st.markdown("<hr style='border-color:#1e2a38;margin:28px 0'>", unsafe_allow_html=True)
 
     # ── TABLE 2: UNLINKED (RAMA found, visit not linked) ──────────────────────
+    # Sub-split the unlinked group so the UI shows which reason applies
+    unlinked_date  = unlinked[unlinked["_note"] == "DATE_MISMATCH"]
+    unlinked_rama  = unlinked[unlinked["_note"] == "RAMA_MISMATCH"]
+
     st.markdown(f"""
 <div class='fraud-card fraud-card-amber'>
   <div style='display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px'>
     <div>
       <span style='font-size:16px;font-weight:800;color:#fbbf24;font-family:Syne,sans-serif'>
-        🟡 Table 2 — RAMA Found, Visit Not Linked
+        🟡 Table 2 — Visit Not Linked
       </span>
-      <span class='badge badge-amber' style='margin-left:10px'>{len(unlinked):,} vouchers</span>
+      <span class='badge badge-amber' style='margin-left:10px'>{len(unlinked):,} vouchers total</span>
       <span class='badge badge-amber' style='margin-left:6px'>RWF {unlinked_ins:,.0f}</span>
     </div>
     <span style='font-size:11px;color:#92400e;font-family:monospace'>
-      Patient exists in a facility file but dispensing date is outside the ±{date_window}-day window
+      Possible visit exists but cannot be firmly linked to this dispensing
+    </span>
+  </div>
+  <div style='margin-top:10px;display:flex;gap:16px;flex-wrap:wrap;font-size:11px;font-family:monospace'>
+    <span style='color:#f59e0b'>
+      📅 <b>{len(unlinked_date):,}</b> Date mismatch
+      — RAMA found but dispensing date is outside the ±{date_window}-day window
+    </span>
+    <span style='color:#a78bfa'>
+      🔀 <b>{len(unlinked_rama):,}</b> RAMA mismatch
+      — name matches a facility record but RAMA numbers differ (possible data-entry error / affiliate swap)
     </span>
   </div>
 </div>""", unsafe_allow_html=True)
 
     if not unlinked.empty:
-        t2c1, t2c2 = st.columns([2,1])
+        t2c1, t2c2, t2c3 = st.columns([2, 1, 1])
         with t2c1:
             t2_srch = st.text_input("🔍 Search", placeholder="Name, RAMA…", key="t2_srch")
         with t2c2:
             t2_max_gap = st.number_input("Max days apart to show", 1, 365, 60, key="t2_gap")
+        with t2c3:
+            t2_note_filter = st.selectbox(
+                "Sub-type",
+                ["All", "Date mismatch only", "RAMA mismatch only"],
+                key="t2_note",
+                help="Filter by the reason this record is unlinked",
+            )
 
         t2_disp = unlinked.copy()
         if t2_srch:
@@ -3596,18 +3696,33 @@ with tab_xfac:
                 lambda c: c.astype(str).str.contains(t2_srch, case=False, na=False)
             ).any(axis=1)
             t2_disp = t2_disp[mask]
+        if t2_note_filter == "Date mismatch only":
+            t2_disp = t2_disp[t2_disp["_note"] == "DATE_MISMATCH"]
+        elif t2_note_filter == "RAMA mismatch only":
+            t2_disp = t2_disp[t2_disp["_note"] == "RAMA_MISMATCH"]
         if t2_max_gap:
             t2_disp = t2_disp[
                 t2_disp["days_apart"].isna() | (t2_disp["days_apart"] <= t2_max_gap)
             ]
 
+        # Build a readable reason label
+        def _unlinked_reason(note):
+            if note == "RAMA_MISMATCH":
+                return "🔀 RAMA mismatch — name matched"
+            return "📅 Date outside window"
+
+        t2_disp = t2_disp.copy()
+        t2_disp["_reason_label"] = t2_disp["_note"].apply(_unlinked_reason)
+
         t2_show = t2_disp[[
             "ph_voucher","ph_patient","ph_rama","ph_date","ph_ins",
-            "fac_name","fac_date","fac_source","days_apart","name_score"
+            "fac_name","fac_rama","fac_date","fac_source",
+            "days_apart","name_score","_reason_label",
         ]].copy()
         t2_show.columns = [
-            "Pharmacy Voucher","Pharmacy Patient","RAMA","Pharmacy Date","Insurance (RWF)",
-            "Facility Patient","Facility Visit Date","Facility","Days Apart","Name Score"
+            "Pharmacy Voucher","Pharmacy Patient","Pharmacy RAMA","Pharmacy Date","Insurance (RWF)",
+            "Facility Patient","Facility RAMA","Facility Visit Date","Facility",
+            "Days Apart","Name Score","Reason",
         ]
         for dcol in ["Pharmacy Date","Facility Visit Date"]:
             t2_show[dcol] = pd.to_datetime(t2_show[dcol], errors="coerce").dt.strftime("%d/%m/%Y").fillna("—")
