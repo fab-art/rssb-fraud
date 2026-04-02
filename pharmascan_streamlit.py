@@ -4346,29 +4346,31 @@ with tab_dataprep:
                     'Prepared Data Preview (first 50 rows)</div>', unsafe_allow_html=True)
         st.dataframe(_prev_clean.head(50), use_container_width=True, height=280)
 
-        # ── Column rename overrides ────────────────────────────────────────
-        with st.expander("🔧 Optional: rename raw_ columns", expanded=False):
-            st.markdown("""<div style='font-size:11px;color:#64748b;
-            font-family:monospace;margin-bottom:8px'>
-            Columns that were not mapped to a system field are kept with a
-            <code>raw_</code> prefix. You can give them friendlier names below.
-            Leave blank to keep the auto-generated name.</div>""",
-            unsafe_allow_html=True)
-            _raw_cols = [c for c in _prev_clean.columns if c.startswith("raw_")]
-            _rename_overrides = {}
-            if _raw_cols:
-                _rnc = st.columns(min(3, len(_raw_cols)))
-                for _ri, _rc in enumerate(_raw_cols):
-                    _new_name = _rnc[_ri % 3].text_input(
-                        _rc, value="", placeholder=f"{_rc}", key=f"dp_rename_{_rc}",
-                        label_visibility="visible",
-                    )
-                    if _new_name.strip():
-                        _rename_overrides[_rc] = _new_name.strip()
-            if _rename_overrides:
-                _prev_clean = _prev_clean.rename(columns=_rename_overrides)
-                st.session_state["dp_rename_overrides"] = _rename_overrides
-
+       # ── Column rename overrides ────────────────────────────────────────
+        _show_rename = st.checkbox("🔧 Optional: rename raw_ columns", value=False)
+        if _show_rename:
+            with st.container():
+                st.markdown("""<div style='font-size:11px;color:#64748b;
+                font-family:monospace;margin-bottom:8px'>
+                Columns that were not mapped to a system field are kept with a
+                <code>raw_</code> prefix. You can give them friendlier names below.
+                Leave blank to keep the auto-generated name.</div>""",
+                unsafe_allow_html=True)
+                _raw_cols = [c for c in _prev_clean.columns if c.startswith("raw_")]
+                _rename_overrides = {}
+                if _raw_cols:
+                    _rnc = st.columns(min(3, len(_raw_cols)))
+                    for _ri, _rc in enumerate(_raw_cols):
+                        _new_name = _rnc[_ri % 3].text_input(
+                            _rc, value="", placeholder=f"{_rc}", key=f"dp_rename_{_rc}",
+                            label_visibility="visible",
+                        )
+                        if _new_name.strip():
+                            _rename_overrides[_rc] = _new_name.strip()
+                if _rename_overrides:
+                    _prev_clean = _prev_clean.rename(columns=_rename_overrides)
+                    st.session_state["dp_rename_overrides"] = _rename_overrides
+                    
         st.markdown("<br>", unsafe_allow_html=True)
         if st.button("✅ Data looks good — proceed to commit", type="primary", key="dp_s3_next"):
             st.session_state["dp_step3_done"]     = True
