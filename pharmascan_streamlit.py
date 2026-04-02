@@ -1,12 +1,3 @@
-"""
-PharmaScan — Pharmacy Voucher Intelligence (Streamlit Edition)
-
-Install:
-    pip install streamlit pandas matplotlib networkx openpyxl odfpy
-
-Run:
-    streamlit run pharmascan_streamlit.py
-"""
 
 import difflib
 import io
@@ -2101,108 +2092,209 @@ def generate_counter_verification_xlsx(
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.markdown('<div class="sidebar-title">💊 PharmaScan</div>', unsafe_allow_html=True)
-    st.markdown('<div class="sidebar-sub">Pharmacy Voucher Intelligence</div>', unsafe_allow_html=True)
+    st.markdown("""
+<div style='margin-bottom:6px'>
+  <div style='font-family:Syne,sans-serif;font-size:22px;font-weight:800;color:#e2e8f0;
+       letter-spacing:-0.5px'>💊 Pharma<span style='color:#00e5a0'>Scan</span></div>
+  <div style='font-size:11px;color:#475569;font-family:monospace;
+       letter-spacing:.06em;text-transform:uppercase'>Voucher Intelligence · RSSB</div>
+</div>""", unsafe_allow_html=True)
+
+    st.markdown("<hr style='border-color:#1e2a38;margin:10px 0 14px'>", unsafe_allow_html=True)
+
+    # ── File uploader ─────────────────────────────────────────────────────────
+    st.markdown("""<div style='font-size:11px;font-weight:700;color:#64748b;
+    text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px'>
+    📂 Source File</div>""", unsafe_allow_html=True)
 
     uploaded = st.file_uploader(
         "Upload voucher report",
         type=["csv", "xlsx", "xls", "ods"],
-        help="Supports CSV, Excel (.xlsx/.xls), and ODS",
+        help="Supports CSV, Excel (.xlsx/.xls), and ODS. Column mapping happens in the Data Prep tab.",
+        label_visibility="collapsed",
     )
 
-    st.markdown("---")
-    st.markdown("**⚙️ Analysis Settings**")
-    rapid_days = st.slider("Rapid revisit window (days)", 1, 30, 7)
-    top_n      = st.slider("Top N for charts", 5, 25, 15)
-    show_raw   = st.checkbox("Show raw column names in tables", value=False)
+    st.markdown("<hr style='border-color:#1e2a38;margin:14px 0'>", unsafe_allow_html=True)
 
-    st.markdown("---")
-    st.markdown("""**📋 Detected columns**
-<small style='color:#64748b;font-family:monospace;line-height:2'>
-<b style='color:#0ea5e9'>Patient</b><br>
-RAMA Number → patient_id<br>
-Patient Name → patient_name<br>
-Patient Type · Gender · Is Newborn<br><br>
-<b style='color:#0ea5e9'>Practitioner</b><br>
-Practitioner Name → doctor_name<br>
-Practitioner Type → doctor_type<br><br>
-<b style='color:#0ea5e9'>Visit</b><br>
-Dispensing Date → visit_date<br>
-Paper Code → voucher_id<br><br>
-<b style='color:#0ea5e9'>Financials</b><br>
-Total Cost → amount<br>
-Medicine Cost · Patient Co-payment<br>
-Insurance Co-payment
-</small>""", unsafe_allow_html=True)
+    # ── Data Lake status panel ────────────────────────────────────────────────
+    st.markdown("""<div style='font-size:11px;font-weight:700;color:#64748b;
+    text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px'>
+    🗄️ Data Lake</div>""", unsafe_allow_html=True)
 
-# ── Landing page ──────────────────────────────────────────────────────────────
-if uploaded is None:
-    st.markdown("""
-<div style='text-align:center;padding:80px 20px 40px'>
-  <div style='font-size:56px;margin-bottom:16px'>💊</div>
-  <div style='font-family:Syne,sans-serif;font-size:36px;font-weight:800;color:#e2e8f0;margin-bottom:8px'>
-    Pharma<span style='color:#00e5a0'>Scan</span></div>
-  <div style='color:#64748b;font-size:16px;margin-bottom:32px'>Pharmacy Voucher Intelligence</div>
+    _dl = st.session_state.get("data_lake", {})
+    _dl_committed = _dl.get("committed", False)
+
+    if _dl_committed:
+        _dl_rows    = len(_dl["df"])
+        _dl_cols    = len(_dl["df"].columns)
+        _dl_fname   = _dl.get("filename", "—")[:28]
+        _dl_ts      = _dl.get("committed_at", "—")
+        _dl_fields  = _dl.get("mapped_fields", [])
+        st.markdown(f"""
+<div style='background:#031a0a;border:1px solid #14532d;border-radius:10px;
+     padding:12px 14px;font-family:monospace;font-size:11px'>
+  <div style='color:#22c55e;font-weight:700;margin-bottom:6px'>● ACTIVE</div>
+  <div style='color:#64748b'>File: <span style='color:#e2e8f0'>{_dl_fname}</span></div>
+  <div style='color:#64748b'>{_dl_rows:,} rows · {_dl_cols} columns</div>
+  <div style='color:#64748b'>Committed: <span style='color:#94a3b8'>{_dl_ts}</span></div>
+  <div style='margin-top:6px;display:flex;flex-wrap:wrap;gap:3px'>
+    {''.join(f"<span style='background:rgba(0,229,160,.08);border:1px solid rgba(0,229,160,.2);border-radius:4px;padding:1px 6px;color:#00e5a0;font-size:10px'>{f}</span>" for f in _dl_fields[:8])}
+  </div>
 </div>""", unsafe_allow_html=True)
-    for col, icon, title, desc in zip(
-        st.columns(4),
-        ["🔧", "🔁", "⚡", "🕸️"],
-        ["Auto Column Fix", "Repeat Detection", "Rapid Revisits", "Network Graph"],
+
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("🗑️ Clear Data Lake", use_container_width=True, type="secondary"):
+            for k in ["data_lake","dp_result","dp_map_used","raw_bytes","raw_filename"]:
+                st.session_state.pop(k, None)
+            st.rerun()
+    else:
+        st.markdown("""
+<div style='background:#0d1117;border:1px dashed #1e2a38;border-radius:10px;
+     padding:12px 14px;font-family:monospace;font-size:11px;text-align:center'>
+  <div style='color:#475569;margin-bottom:4px'>● EMPTY</div>
+  <div style='color:#334155;font-size:10px'>Upload a file and complete<br>Data Prep to activate</div>
+</div>""", unsafe_allow_html=True)
+
+    st.markdown("<hr style='border-color:#1e2a38;margin:14px 0'>", unsafe_allow_html=True)
+
+    # ── Quick settings (only when data lake active) ───────────────────────────
+    if _dl_committed:
+        st.markdown("""<div style='font-size:11px;font-weight:700;color:#64748b;
+        text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px'>
+        ⚙️ Quick Settings</div>""", unsafe_allow_html=True)
+        show_raw = st.checkbox("Show raw column names", value=False)
+        top_n    = st.slider("Top N for charts", 5, 25,
+                             _dl.get("top_n", 15), key="sb_top_n")
+    else:
+        show_raw = False
+        top_n    = 15
+
+# ── Store raw bytes when file is uploaded ─────────────────────────────────────
+if uploaded is not None:
+    _raw_bytes_new = uploaded.read()
+    _new_name = uploaded.name
+    if st.session_state.get("raw_filename") != _new_name:
+        st.session_state["raw_bytes"]    = _raw_bytes_new
+        st.session_state["raw_filename"] = _new_name
+        # New file → clear data lake so user re-runs Data Prep
+        for _k in ["data_lake", "dp_result", "dp_map_used", "normalised_df",
+                   "normalised_col", "normalised_map", "ann_df", "ann_detected"]:
+            st.session_state.pop(_k, None)
+        st.rerun()
+    elif "raw_bytes" not in st.session_state:
+        st.session_state["raw_bytes"]    = _raw_bytes_new
+        st.session_state["raw_filename"] = _new_name
+
+# ── Landing page (no file yet) ────────────────────────────────────────────────
+if "raw_bytes" not in st.session_state:
+    st.markdown("""
+<div style='text-align:center;padding:60px 20px 30px'>
+  <div style='font-size:52px;margin-bottom:14px'>💊</div>
+  <div style='font-family:Syne,sans-serif;font-size:40px;font-weight:800;color:#e2e8f0;
+       margin-bottom:6px;letter-spacing:-1px'>
+    Pharma<span style='color:#00e5a0'>Scan</span>
+  </div>
+  <div style='color:#475569;font-size:14px;font-family:monospace;
+       letter-spacing:.1em;text-transform:uppercase;margin-bottom:40px'>
+    RSSB Pharmacy Voucher Intelligence
+  </div>
+</div>""", unsafe_allow_html=True)
+
+    _f1, _f2, _f3, _f4 = st.columns(4)
+    for _col, _icon, _title, _desc in zip(
+        [_f1, _f2, _f3, _f4],
+        ["🗂️", "🔍", "🕸️", "🛡️"],
+        ["Data Prep & Lake", "Cross-Facility Match", "Network Graph", "Rules Engine"],
         [
-            "Maps RAMA Number, Dispensing Date, Practitioner Name and 30+ variants automatically",
-            "Finds patients with multiple vouchers and ranks them by frequency",
-            "Flags same patient returning within your chosen day window",
-            "Pick any two columns — patients, doctors, types — to explore as a network",
+            "Map columns from any file format once — all analysis reads from your committed data lake",
+            "Fuzzy RAMA + name matching against clinic/hospital visit files to surface phantom claims",
+            "Explore patient-doctor-facility relationships as an interactive network",
+            "17 rules scoring every claim: quantity excess, diagnosis mismatches, rapid refills and more",
         ],
     ):
-        with col:
+        with _col:
             st.markdown(f"""
-<div style='background:#111720;border:1px solid #1e2a38;border-radius:12px;padding:20px;
-            text-align:center;min-height:150px'>
-  <div style='font-size:28px;margin-bottom:8px'>{icon}</div>
-  <div style='font-weight:700;color:#e2e8f0;margin-bottom:4px'>{title}</div>
-  <div style='font-size:12px;color:#64748b'>{desc}</div>
+<div style='background:#111720;border:1px solid #1e2a38;border-radius:14px;
+            padding:22px 18px;text-align:center;min-height:160px;
+            transition:border-color .2s'>
+  <div style='font-size:30px;margin-bottom:10px'>{_icon}</div>
+  <div style='font-weight:700;color:#e2e8f0;margin-bottom:6px;
+       font-family:Syne,sans-serif;font-size:14px'>{_title}</div>
+  <div style='font-size:11px;color:#475569;line-height:1.6'>{_desc}</div>
 </div>""", unsafe_allow_html=True)
+
     st.markdown("<br>", unsafe_allow_html=True)
-    st.info("👈 Upload a pharmacy voucher file in the sidebar to begin")
+    st.markdown("""
+<div style='background:#030d1a;border:1px solid #1e3a5f;border-radius:12px;
+     padding:16px 22px;text-align:center;font-family:monospace'>
+  <span style='color:#38bdf8;font-size:13px'>
+    👈 Upload a pharmacy voucher report in the sidebar to get started
+  </span><br>
+  <span style='color:#334155;font-size:11px'>
+    Supports CSV · XLSX · XLS · ODS — column mapping adapts to any format
+  </span>
+</div>""", unsafe_allow_html=True)
     st.stop()
 
-# ── Process ───────────────────────────────────────────────────────────────────
-file_bytes = uploaded.read()
-with st.spinner("Analysing voucher data…"):
-    try:
-        df, col_map, s, repeat_groups, repeat_detail, rapid = load_and_process(
-            file_bytes, uploaded.name, rapid_days
-        )
-    except Exception as e:
-        st.error(f"❌ Could not process file: {e}")
-        st.stop()
+# ── Data lake unpack (available to all tabs after commit) ─────────────────────
+_dl_committed = st.session_state.get("data_lake", {}).get("committed", False)
 
-changed = {k: v for k, v in col_map.items() if k != v}
-if changed:
-    chips = "".join(f'<span class="chip">{k} → {v}</span>' for k, v in changed.items())
+if _dl_committed:
+    _dl        = st.session_state["data_lake"]
+    df         = _dl["df"]
+    s          = _dl["stats"]
+    rapid      = _dl["rapid"]
+    rapid_days = _dl["rapid_days"]
+    repeat_groups  = _dl["repeat_groups"]
+    repeat_detail  = _dl["repeat_detail"]
+    col_map        = _dl["col_map"]
+    top_n          = st.session_state.get("sb_top_n", _dl.get("top_n", 15))
+else:
+    # Minimal defaults so tabs don't crash if accessed before commit
+    df = pd.DataFrame()
+    s  = {}
+    rapid = []
+    rapid_days = 7
+    repeat_groups = []
+    repeat_detail = pd.DataFrame()
+    col_map = {}
+
+# ── Helper: render a locked-tab placeholder ───────────────────────────────────
+def _render_tab_locked(tab_name: str = ""):
     st.markdown(f"""
-<div class="info-banner">
-  <b>🔧 Columns auto-normalised</b> — {len(changed)} name(s) mapped:
-  <div class="chip-row">{chips}</div>
+<div style='display:flex;flex-direction:column;align-items:center;justify-content:center;
+     padding:60px 20px;text-align:center'>
+  <div style='font-size:40px;margin-bottom:16px;opacity:.4'>🗄️</div>
+  <div style='font-family:Syne,sans-serif;font-size:20px;font-weight:700;
+       color:#334155;margin-bottom:8px'>Data Lake Not Yet Active</div>
+  <div style='font-size:13px;color:#1e3a5f;font-family:monospace;max-width:380px;
+       line-height:1.7'>
+    Complete the <b style='color:#0ea5e9'>Data Prep</b> wizard and click
+    <b style='color:#00e5a0'>Commit to Data Lake</b> to unlock
+    <b style='color:#e2e8f0'>{tab_name}</b> and all other analysis tabs.
+  </div>
 </div>""", unsafe_allow_html=True)
 
 # ── Tabs ──────────────────────────────────────────────────────────────────────
-tab_summary, tab_records, tab_repeat, tab_rapid, tab_network, tab_norm, tab_cv, tab_xfac, tab_dataprep, tab_rules = st.tabs([
+(tab_dataprep, tab_summary, tab_records, tab_repeat,
+ tab_rapid, tab_network, tab_norm, tab_cv, tab_xfac, tab_rules) = st.tabs([
+    "🗂️ Data Prep",
     "📊 Summary",
     "📋 All Records",
-    f"🔁 Repeat Patients  {'🟡' if repeat_groups else '🟢'}  {len(repeat_groups)}",
+    f"🔁 Repeat Patients {'🟡' if repeat_groups else '🟢'} {len(repeat_groups)}",
     f"⚡ Rapid Revisits  {'🔴' if rapid else '🟢'}  {len(rapid)}",
     "🕸️ Network Graph",
     "✏️ Normalise Names",
-    "📄 Counter-Verification Report",
+    "📄 Counter-Verification",
     "🏥 Cross-Facility Match",
-    "🗂️ Data Prep",
     "🛡️ Rules Engine",
 ])
 
 # ══ SUMMARY ══════════════════════════════════════════════════════════════════
 with tab_summary:
+  if not _dl_committed:
+    _render_tab_locked("Summary")
+  else:
     c = st.columns(4)
     c[0].metric("Total Records",         f"{s['total_rows']:,}")
     c[1].metric("Unique Patients",       f"{s['unique_patients']:,}" if "unique_patients" in s else "—")
@@ -2271,6 +2363,9 @@ with tab_summary:
 
 # ══ ALL RECORDS ═══════════════════════════════════════════════════════════════
 with tab_records:
+  if not _dl_committed:
+    _render_tab_locked("All Records")
+  else:
     st.markdown(f'<div class="sec-head">All Records — {len(df):,} rows</div>', unsafe_allow_html=True)
     search = st.text_input("🔍 Filter rows", key="rec_search", placeholder="Type to search any column…")
     display_df = df.copy()
@@ -2284,6 +2379,9 @@ with tab_records:
 
 # ══ REPEAT PATIENTS ══════════════════════════════════════════════════════════
 with tab_repeat:
+  if not _dl_committed:
+    _render_tab_locked("Repeat Patients")
+  else:
     if not repeat_groups:
         st.success("✅ No patients with multiple visits detected.")
     else:
@@ -2333,6 +2431,9 @@ with tab_repeat:
 
 # ══ RAPID REVISITS ════════════════════════════════════════════════════════════
 with tab_rapid:
+  if not _dl_committed:
+    _render_tab_locked("Rapid Revisits")
+  else:
     if not rapid:
         st.success(f"✅ No rapid revisits detected within {rapid_days} days.")
     else:
@@ -2373,6 +2474,9 @@ with tab_rapid:
 
 # ══ NETWORK GRAPH ════════════════════════════════════════════════════════════
 with tab_network:
+  if not _dl_committed:
+    _render_tab_locked("Network Graph")
+  else:
 
     # All text / categorical columns available for network nodes
     cat_cols = [c for c in df.columns
@@ -2500,7 +2604,9 @@ with tab_network:
 
 # ══ NORMALISE NAMES TAB ══════════════════════════════════════════════════════
 with tab_norm:
-
+  if not _dl_committed:
+    _render_tab_locked("Normalise Names")
+  else:
     st.markdown('<div class="sec-head">✏️ Doctor / Practitioner Name Normalisation</div>',
                 unsafe_allow_html=True)
 
@@ -2676,8 +2782,10 @@ with tab_norm:
             )
 
 # ══ COUNTER-VERIFICATION REPORT TAB ══════════════════════════════════════════
-# ══ COUNTER-VERIFICATION REPORT TAB ══════════════════════════════════════════
 with tab_cv:
+  if not _dl_committed:
+    _render_tab_locked("Counter-Verification Report")
+  else:
     st.markdown('<div class="sec-head">📄 Counter-Verification Report Generator</div>',
                 unsafe_allow_html=True)
 
@@ -3075,6 +3183,9 @@ with tab_cv:
 
 # ══ CROSS-FACILITY FRAUD DETECTION TAB ═══════════════════════════════════════
 with tab_xfac:
+  if not _dl_committed:
+    _render_tab_locked("Cross-Facility Match")
+  else:
     import math
 
     # ── CSS for fraud tab cards ───────────────────────────────────────────────
@@ -3290,33 +3401,6 @@ with tab_xfac:
         require_name = st.checkbox("Require name match", value=True,
             help="If OFF, matches on RAMA number alone (catches name typos)")
 
-    cfg4, cfg5 = st.columns(2)
-    with cfg4:
-        fuzzy_rama_enabled = st.checkbox(
-            "🔀 Fuzzy RAMA fallback (name-only match)",
-            value=True,
-            help=(
-                "When a pharmacy RAMA number is NOT found in any facility file, "
-                "the app will still search facility records by patient name. "
-                "If a name match is found above the threshold below (even though the "
-                "RAMA numbers differ), the record is flagged as 'Visit Not Linked — "
-                "RAMA Mismatch' rather than 'No Hospital Record'. "
-                "This catches data-entry errors, affiliate-number swaps, and "
-                "cases where the same person appears under two different RAMA codes."
-            ),
-        )
-    with cfg5:
-        fuzzy_rama_thresh = st.slider(
-            "Name threshold for RAMA fallback (0–1)",
-            0.0, 1.0, 0.5, 0.05,
-            disabled=not fuzzy_rama_enabled,
-            help=(
-                "Minimum token-overlap score between the pharmacy patient name and "
-                "a facility patient name before a RAMA-mismatch record is moved from "
-                "'No Record' → 'Visit Not Linked'. Raise this to reduce false positives."
-            ),
-        )
-
     # ── Build pharmacy working set ────────────────────────────────────────────
     def _ph_col(*keys):
         for k in keys:
@@ -3346,20 +3430,8 @@ with tab_xfac:
         ta = set(str(a).upper().split()); tb = set(str(b).upper().split())
         return len(ta & tb) / len(ta | tb) if ta and tb else 0.0
 
-    # ── Pre-build a normalised name index for fuzzy-RAMA fallback ─────────────
-    # We keep a lightweight list of (norm_name, row_iloc) so we can scan by name
-    # without re-normalising on every iteration.
-    if fuzzy_rama_enabled:
-        _fac_names_norm = fac_df["_name"].str.upper().str.strip().tolist()
-    else:
-        _fac_names_norm = []
-
     # ── Core matching ─────────────────────────────────────────────────────────
-    # For each pharmacy row, find best facility match by RAMA + name + date.
-    # New step: when exact RAMA lookup fails, try a name-only fuzzy search across
-    # ALL facility records.  A hit here means the same person may have been
-    # registered under a different RAMA/affiliate number → flag as UNLINKED
-    # (RAMA_MISMATCH) instead of NO_RECORD, which is a softer, more accurate flag.
+    # For each pharmacy row, find best facility match by RAMA + name + date
     results = []
     for _, pr in ph_work.iterrows():
         rama     = pr["_rama"]
@@ -3369,57 +3441,21 @@ with tab_xfac:
         fac_rows = fac_df[fac_df["_rama"] == rama]
 
         if fac_rows.empty:
-            # ── Fuzzy-RAMA fallback: scan facility by name ─────────────────
-            fuzzy_hit = None
-            fuzzy_score = 0.0
-            if fuzzy_rama_enabled and ph_name.strip():
-                ph_name_up = ph_name.upper().strip()
-                for idx, fn in enumerate(_fac_names_norm):
-                    sc = _tok(ph_name_up, fn)
-                    if sc > fuzzy_score:
-                        fuzzy_score = sc
-                        if sc >= fuzzy_rama_thresh:
-                            fuzzy_hit = fac_df.iloc[idx]
-
-            if fuzzy_hit is not None:
-                # Name matches a facility record but RAMA numbers differ
-                # → UNLINKED with RAMA_MISMATCH note (softer than NO_RECORD)
-                fac_hit_date = fuzzy_hit["_date"]
-                nearest_d = None
-                if pd.notna(ph_date) and pd.notna(fac_hit_date):
-                    nearest_d = int(abs((ph_date - fac_hit_date).days))
-                results.append({
-                    "status":      "UNLINKED",
-                    "_note":       "RAMA_MISMATCH",
-                    "ph_voucher":  pr["_vou"],        "ph_patient": ph_name,
-                    "ph_rama":     rama,               "ph_date":    ph_date,
-                    "ph_ins":      pr["_ins"],         "ph_total":   pr["_tot"],
-                    "ph_doctor":   pr["_doc"],         "ph_dept":    pr["_dpt"],
-                    "fac_voucher": fuzzy_hit["voucher_id"],
-                    "fac_name":    fuzzy_hit["_name"],
-                    "fac_rama":    fuzzy_hit["_rama"],
-                    "fac_date":    fac_hit_date,
-                    "fac_source":  fuzzy_hit["_source"],
-                    "days_apart":  nearest_d,
-                    "name_score":  round(fuzzy_score, 2),
-                })
-            else:
-                # Truly no facility record — neither RAMA nor name matches
-                results.append({
-                    "status":      "NO_RECORD",
-                    "_note":       "",
-                    "ph_voucher":  pr["_vou"],
-                    "ph_patient":  ph_name,
-                    "ph_rama":     rama,
-                    "ph_date":     ph_date,
-                    "ph_ins":      pr["_ins"],
-                    "ph_total":    pr["_tot"],
-                    "ph_doctor":   pr["_doc"],
-                    "ph_dept":     pr["_dpt"],
-                    "fac_voucher": None, "fac_name":   None, "fac_rama": None,
-                    "fac_date":    None, "fac_source": None,
-                    "days_apart":  None, "name_score": None,
-                })
+            # NO facility record for this RAMA at all
+            results.append({
+                "status": "NO_RECORD",
+                "ph_voucher": pr["_vou"],
+                "ph_patient": ph_name,
+                "ph_rama":    rama,
+                "ph_date":    ph_date,
+                "ph_ins":     pr["_ins"],
+                "ph_total":   pr["_tot"],
+                "ph_doctor":  pr["_doc"],
+                "ph_dept":    pr["_dpt"],
+                "fac_voucher": None, "fac_name": None,
+                "fac_date":    None, "fac_source": None,
+                "days_apart":  None, "name_score": None,
+            })
             continue
 
         # RAMA exists — check name + date
@@ -3437,13 +3473,11 @@ with tab_xfac:
             # MATCHED — legitimate dispensing with traced visit
             results.append({
                 "status":      "MATCHED",
-                "_note":       "",
                 "ph_voucher":  pr["_vou"],   "ph_patient": ph_name,
                 "ph_rama":     rama,          "ph_date":    ph_date,
                 "ph_ins":      pr["_ins"],    "ph_total":   pr["_tot"],
                 "ph_doctor":   pr["_doc"],    "ph_dept":    pr["_dpt"],
                 "fac_voucher": best["voucher_id"], "fac_name": best["_name"],
-                "fac_rama":    best["_rama"],
                 "fac_date":    best["_date"],      "fac_source": best["_source"],
                 "days_apart":  best_delta,    "name_score": round(best_score, 2),
             })
@@ -3457,13 +3491,11 @@ with tab_xfac:
             best_fr = fac_rows.iloc[0]
             results.append({
                 "status":      "UNLINKED",
-                "_note":       "DATE_MISMATCH",
                 "ph_voucher":  pr["_vou"],   "ph_patient": ph_name,
                 "ph_rama":     rama,          "ph_date":    ph_date,
                 "ph_ins":      pr["_ins"],    "ph_total":   pr["_tot"],
                 "ph_doctor":   pr["_doc"],    "ph_dept":    pr["_dpt"],
                 "fac_voucher": best_fr["voucher_id"], "fac_name": best_fr["_name"],
-                "fac_rama":    best_fr["_rama"],
                 "fac_date":    best_fr["_date"],      "fac_source": best_fr["_source"],
                 "days_apart":  nearest_d,     "name_score": round(_tok(ph_name, best_fr["_name"]),2),
             })
@@ -3496,7 +3528,7 @@ with tab_xfac:
               f"{len(no_rec):,}",
               f"-{100*len(no_rec)/len(ph_work):.1f}%",
               delta_color="inverse")
-    k4.metric("🟡 Visit not linked",
+    k4.metric("🟡 RAMA found, visit unlinked",
               f"{len(unlinked):,}",
               f"-{100*len(unlinked)/len(ph_work):.1f}%",
               delta_color="inverse")
@@ -3560,7 +3592,7 @@ with tab_xfac:
       <span class='badge badge-red' style='margin-left:6px'>RWF {no_rec_ins:,.0f}</span>
     </div>
     <span style='font-size:11px;color:#991b1b;font-family:monospace'>
-      Patient's RAMA number AND name not found in ANY uploaded facility file
+      Patient's RAMA number not found in ANY uploaded facility file
     </span>
   </div>
 </div>""", unsafe_allow_html=True)
@@ -3646,49 +3678,28 @@ with tab_xfac:
     st.markdown("<hr style='border-color:#1e2a38;margin:28px 0'>", unsafe_allow_html=True)
 
     # ── TABLE 2: UNLINKED (RAMA found, visit not linked) ──────────────────────
-    # Sub-split the unlinked group so the UI shows which reason applies
-    unlinked_date  = unlinked[unlinked["_note"] == "DATE_MISMATCH"]
-    unlinked_rama  = unlinked[unlinked["_note"] == "RAMA_MISMATCH"]
-
     st.markdown(f"""
 <div class='fraud-card fraud-card-amber'>
   <div style='display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px'>
     <div>
       <span style='font-size:16px;font-weight:800;color:#fbbf24;font-family:Syne,sans-serif'>
-        🟡 Table 2 — Visit Not Linked
+        🟡 Table 2 — RAMA Found, Visit Not Linked
       </span>
-      <span class='badge badge-amber' style='margin-left:10px'>{len(unlinked):,} vouchers total</span>
+      <span class='badge badge-amber' style='margin-left:10px'>{len(unlinked):,} vouchers</span>
       <span class='badge badge-amber' style='margin-left:6px'>RWF {unlinked_ins:,.0f}</span>
     </div>
     <span style='font-size:11px;color:#92400e;font-family:monospace'>
-      Possible visit exists but cannot be firmly linked to this dispensing
-    </span>
-  </div>
-  <div style='margin-top:10px;display:flex;gap:16px;flex-wrap:wrap;font-size:11px;font-family:monospace'>
-    <span style='color:#f59e0b'>
-      📅 <b>{len(unlinked_date):,}</b> Date mismatch
-      — RAMA found but dispensing date is outside the ±{date_window}-day window
-    </span>
-    <span style='color:#a78bfa'>
-      🔀 <b>{len(unlinked_rama):,}</b> RAMA mismatch
-      — name matches a facility record but RAMA numbers differ (possible data-entry error / affiliate swap)
+      Patient exists in a facility file but dispensing date is outside the ±{date_window}-day window
     </span>
   </div>
 </div>""", unsafe_allow_html=True)
 
     if not unlinked.empty:
-        t2c1, t2c2, t2c3 = st.columns([2, 1, 1])
+        t2c1, t2c2 = st.columns([2,1])
         with t2c1:
             t2_srch = st.text_input("🔍 Search", placeholder="Name, RAMA…", key="t2_srch")
         with t2c2:
             t2_max_gap = st.number_input("Max days apart to show", 1, 365, 60, key="t2_gap")
-        with t2c3:
-            t2_note_filter = st.selectbox(
-                "Sub-type",
-                ["All", "Date mismatch only", "RAMA mismatch only"],
-                key="t2_note",
-                help="Filter by the reason this record is unlinked",
-            )
 
         t2_disp = unlinked.copy()
         if t2_srch:
@@ -3696,33 +3707,18 @@ with tab_xfac:
                 lambda c: c.astype(str).str.contains(t2_srch, case=False, na=False)
             ).any(axis=1)
             t2_disp = t2_disp[mask]
-        if t2_note_filter == "Date mismatch only":
-            t2_disp = t2_disp[t2_disp["_note"] == "DATE_MISMATCH"]
-        elif t2_note_filter == "RAMA mismatch only":
-            t2_disp = t2_disp[t2_disp["_note"] == "RAMA_MISMATCH"]
         if t2_max_gap:
             t2_disp = t2_disp[
                 t2_disp["days_apart"].isna() | (t2_disp["days_apart"] <= t2_max_gap)
             ]
 
-        # Build a readable reason label
-        def _unlinked_reason(note):
-            if note == "RAMA_MISMATCH":
-                return "🔀 RAMA mismatch — name matched"
-            return "📅 Date outside window"
-
-        t2_disp = t2_disp.copy()
-        t2_disp["_reason_label"] = t2_disp["_note"].apply(_unlinked_reason)
-
         t2_show = t2_disp[[
             "ph_voucher","ph_patient","ph_rama","ph_date","ph_ins",
-            "fac_name","fac_rama","fac_date","fac_source",
-            "days_apart","name_score","_reason_label",
+            "fac_name","fac_date","fac_source","days_apart","name_score"
         ]].copy()
         t2_show.columns = [
-            "Pharmacy Voucher","Pharmacy Patient","Pharmacy RAMA","Pharmacy Date","Insurance (RWF)",
-            "Facility Patient","Facility RAMA","Facility Visit Date","Facility",
-            "Days Apart","Name Score","Reason",
+            "Pharmacy Voucher","Pharmacy Patient","RAMA","Pharmacy Date","Insurance (RWF)",
+            "Facility Patient","Facility Visit Date","Facility","Days Apart","Name Score"
         ]
         for dcol in ["Pharmacy Date","Facility Visit Date"]:
             t2_show[dcol] = pd.to_datetime(t2_show[dcol], errors="coerce").dt.strftime("%d/%m/%Y").fillna("—")
@@ -3907,260 +3903,579 @@ with tab_xfac:
 
 # ══ DATA PREP TAB ════════════════════════════════════════════════════════════
 with tab_dataprep:
-    st.markdown('''
-<div style="background:#111720;border:1px solid #1e2a38;border-left:3px solid #0ea5e9;
-     border-radius:10px;padding:14px 18px;margin-bottom:20px">
-  <b style="color:#0ea5e9">🗂️ Data Preparation Wizard</b><br>
-  <span style="font-size:12px;color:#64748b">
-  Upload <b>any</b> Excel or CSV. The system scans every column, fingerprints its content,
-  and proposes a mapping to the 17 system fields used by the rules engine and analytics.
-  Override any mapping, exclude columns, then export a clean ready-to-analyse file.
-  </span>
-</div>''', unsafe_allow_html=True)
 
-    dp_upload = st.file_uploader(
-        "Upload file to prepare (Excel or CSV)",
-        type=["csv","xlsx","xls","ods"],
-        key="dp_upload",
-    )
-
-    _dp_df = None
-
-    if dp_upload is not None:
-        try:
-            _dp_bytes = dp_upload.read()
-            _dp_fname = dp_upload.name.lower()
-            if _dp_fname.endswith(".csv"):
-                _dp_df = pd.read_csv(io.BytesIO(_dp_bytes), encoding="utf-8",
-                                     on_bad_lines="skip")
-            elif _dp_fname.endswith(".ods"):
-                _dp_df = pd.read_excel(io.BytesIO(_dp_bytes), engine="odf")
+    # ── Step progress bar helper ──────────────────────────────────────────────
+    def _step_bar(active: int):
+        steps = [
+            ("1", "Load File"),
+            ("2", "Map Columns"),
+            ("3", "Review & Clean"),
+            ("4", "Commit to Lake"),
+        ]
+        html = "<div style='display:flex;gap:0;margin-bottom:28px;align-items:stretch'>"
+        for i, (num, label) in enumerate(steps, 1):
+            is_done   = i < active
+            is_active = i == active
+            is_locked = i > active
+            if is_done:
+                bg, border, text_col, num_col = "#031a0a","#16a34a","#22c55e","#22c55e"
+                icon = "✓"
+            elif is_active:
+                bg, border, text_col, num_col = "#030d1a","#0ea5e9","#38bdf8","#0ea5e9"
+                icon = num
             else:
-                _xl = pd.ExcelFile(io.BytesIO(_dp_bytes))
-                _best_sh = max(_xl.sheet_names,
-                               key=lambda s: len(_xl.parse(s, nrows=5).columns))
-                _dp_df = _xl.parse(_best_sh)
-        except Exception as _e:
-            st.error(f"Could not load file: {_e}")
+                bg, border, text_col, num_col = "#0d1117","#1e2a38","#334155","#334155"
+                icon = num
+            sep = "" if i == len(steps) else "<div style='width:2px;background:#1e2a38;flex-shrink:0'></div>"
+            html += f"""
+<div style='flex:1;background:{bg};border:1px solid {border};padding:12px 16px;
+     {"border-radius:10px 0 0 10px" if i==1 else "border-radius:0 10px 10px 0" if i==len(steps) else ""};
+     border-left:{"3px" if is_active else "1px"} solid {border}'>
+  <div style='display:flex;align-items:center;gap:8px'>
+    <div style='width:22px;height:22px;border-radius:50%;border:2px solid {num_col};
+         display:flex;align-items:center;justify-content:center;
+         font-size:11px;font-weight:700;color:{num_col};flex-shrink:0'>{icon}</div>
+    <div style='font-size:12px;font-weight:{"700" if is_active else "500"};
+         color:{text_col};font-family:Syne,sans-serif'>{label}</div>
+  </div>
+</div>{sep}"""
+        html += "</div>"
+        st.markdown(html, unsafe_allow_html=True)
 
-    if _dp_df is not None:
-        # Run profiler
-        with st.spinner("Profiling columns…"):
-            _dp_mapping, _dp_scores, _dp_profiles = auto_map_columns(_dp_df)
+    # ── Load raw file ─────────────────────────────────────────────────────────
+    _raw_bytes = st.session_state.get("raw_bytes")
+    _raw_fname = st.session_state.get("raw_filename", "")
 
-        # ── Summary metrics ─────────────────────────────────────────────────
-        _n_mapped   = len(_dp_mapping)
-        _n_required = sum(1 for f, d in _SYSTEM_FIELDS.items()
-                          if d["required"] and f in _dp_mapping)
-        _n_req_total = sum(1 for d in _SYSTEM_FIELDS.values() if d["required"])
-        _n_unmapped = len(_dp_df.columns) - _n_mapped
+    if not _raw_bytes:
+        st.markdown("""
+<div style='display:flex;flex-direction:column;align-items:center;justify-content:center;
+     padding:60px 20px;text-align:center'>
+  <div style='font-size:42px;margin-bottom:14px'>👈</div>
+  <div style='font-family:Syne,sans-serif;font-size:20px;font-weight:700;
+       color:#e2e8f0;margin-bottom:8px'>Upload a file first</div>
+  <div style='font-size:13px;color:#475569;font-family:monospace'>
+    Use the <b style='color:#0ea5e9'>Source File</b> uploader in the sidebar,
+    then return here to map columns and commit to the data lake.
+  </div>
+</div>""", unsafe_allow_html=True)
+        st.stop()
 
-        _pm1, _pm2, _pm3, _pm4 = st.columns(4)
-        _pm1.metric("Total columns",   len(_dp_df.columns))
-        _pm2.metric("Auto-mapped",     _n_mapped)
-        _pm3.metric("Required fields", f"{_n_required}/{_n_req_total}")
-        _pm4.metric("Unmapped cols",   _n_unmapped)
-
-        # ── Column profile table ─────────────────────────────────────────────
-        st.markdown('<div class="sec-head">Column Profiles</div>', unsafe_allow_html=True)
-
-        _profile_rows = []
-        for col in _dp_df.columns:
-            prof = _dp_profiles.get(col, {})
-            mapped_to = _dp_mapping.get(
-                next((f for f, c in _dp_mapping.items() if c == col), ""), ""
-            )
-            # find field from reverse mapping
-            _mapped_field = next((f for f, c in _dp_mapping.items() if c == col), "—")
-            _field_label  = (_SYSTEM_FIELDS[_mapped_field]["label"]
-                             if _mapped_field in _SYSTEM_FIELDS else "—")
-            _group        = (_SYSTEM_FIELDS[_mapped_field]["group"]
-                             if _mapped_field in _SYSTEM_FIELDS else "—")
-            _best_score   = max(_dp_scores.get(col, {}).values(), default=0)
-
-            _profile_rows.append({
-                "Original Column": col,
-                "Dtype":          prof.get("dtype","?"),
-                "Non-null %":     f"{100-prof.get('null_pct',0):.0f}%",
-                "Unique":         prof.get("unique","?"),
-                "Sample":         " | ".join(prof.get("samples",[])[:3]),
-                "→ System Field": _field_label,
-                "Group":          _group,
-                "Confidence":     f"{_best_score*100:.0f}%",
-            })
-
-        _prof_df = pd.DataFrame(_profile_rows)
-
-        def _highlight_confidence(val):
+    # ── Parse raw file (cached on session key) ────────────────────────────────
+    _dp_cache_key = f"dp_raw_{_raw_fname}"
+    if _dp_cache_key not in st.session_state:
+        with st.spinner(f"Loading {_raw_fname}…"):
             try:
-                v = int(val.replace("%",""))
-                if v >= 70: return "color:#00e5a0;font-weight:bold"
-                if v >= 40: return "color:#f59e0b"
-                if v >  0:  return "color:#ef4444"
+                _fn = _raw_fname.lower()
+                if _fn.endswith(".csv"):
+                    _dp_df = pd.read_csv(io.BytesIO(_raw_bytes), encoding="utf-8",
+                                         on_bad_lines="skip")
+                elif _fn.endswith(".ods"):
+                    _dp_df = pd.read_excel(io.BytesIO(_raw_bytes), engine="odf")
+                else:
+                    _xl = pd.ExcelFile(io.BytesIO(_raw_bytes))
+                    # Best sheet = most columns; tie-break = most rows
+                    _scores = {}
+                    for _sn in _xl.sheet_names:
+                        try:
+                            _tmp = _xl.parse(_sn, nrows=5)
+                            _scores[_sn] = len(_tmp.columns) * 1000 + len(_xl.parse(_sn, nrows=500))
+                        except Exception:
+                            _scores[_sn] = 0
+                    _best_sh = max(_scores, key=_scores.get)
+                    _dp_df = _xl.parse(_best_sh)
+                    # Auto-detect header row
+                    for _hi, _hrow in _dp_df.head(10).iterrows():
+                        _joined = " ".join(str(v).lower() for v in _hrow if pd.notna(v))
+                        if any(k in _joined for k in ["rama","patient","dispensing","voucher","date","affil"]):
+                            if _hi > 0:
+                                _dp_df = _xl.parse(_best_sh, header=_hi)
+                            break
+                st.session_state[_dp_cache_key] = _dp_df
+            except Exception as _e:
+                st.error(f"❌ Could not load file: {_e}")
+                import traceback; st.code(traceback.format_exc())
+                st.stop()
+    _dp_df = st.session_state[_dp_cache_key]
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # STEP 1 — File overview
+    # ─────────────────────────────────────────────────────────────────────────
+    _step_bar(1 if not st.session_state.get("dp_step1_done") else
+              2 if not st.session_state.get("dp_step2_done") else
+              3 if not st.session_state.get("dp_step3_done") else 4)
+
+    with st.expander("📄 Step 1 — File Overview", expanded=not st.session_state.get("dp_step1_done", False)):
+        _s1c1, _s1c2, _s1c3, _s1c4 = st.columns(4)
+        _s1c1.metric("File", _raw_fname[:30])
+        _s1c2.metric("Rows", f"{len(_dp_df):,}")
+        _s1c3.metric("Columns", len(_dp_df.columns))
+        _s1c4.metric("Est. size", f"{_dp_df.memory_usage(deep=True).sum() / 1024:.0f} KB")
+
+        # Sheet selector if Excel multi-sheet
+        _fn = _raw_fname.lower()
+        if not _fn.endswith(".csv") and not _fn.endswith(".ods"):
+            try:
+                _xl2 = pd.ExcelFile(io.BytesIO(_raw_bytes))
+                if len(_xl2.sheet_names) > 1:
+                    _selected_sheet = st.selectbox(
+                        "Sheet", _xl2.sheet_names, key="dp_sheet_sel",
+                        help="Switch sheet — the app will re-profile")
+                    if st.button("🔄 Load selected sheet", key="dp_reload_sheet"):
+                        _dp_df2 = _xl2.parse(_selected_sheet)
+                        st.session_state[_dp_cache_key] = _dp_df2
+                        for _k in ["dp_step1_done","dp_step2_done","dp_step3_done","dp_mapping_confirmed"]:
+                            st.session_state.pop(_k, None)
+                        st.rerun()
             except Exception:
                 pass
-            return "color:#64748b"
+
+        st.markdown('<div style="font-size:11px;font-weight:700;color:#64748b;'
+                    'text-transform:uppercase;letter-spacing:.06em;margin:14px 0 6px">'
+                    'Column Preview</div>', unsafe_allow_html=True)
+
+        # Column quality summary table
+        _qual_rows = []
+        for _c in _dp_df.columns:
+            _s_col = _dp_df[_c]
+            _null_pct = round(100 * _s_col.isna().sum() / max(len(_s_col), 1), 1)
+            _uniq = int(_s_col.nunique())
+            _samples = " · ".join(str(v) for v in _s_col.dropna().head(3).tolist())[:60]
+            _fill_color = "#031a0a" if _null_pct < 5 else "#1a1000" if _null_pct < 30 else "#1a0505"
+            _fill_text  = "#22c55e" if _null_pct < 5 else "#f59e0b" if _null_pct < 30 else "#ef4444"
+            _qual_rows.append({
+                "Column": str(_c)[:40],
+                "Type": str(_s_col.dtype),
+                "Fill %": f"{100-_null_pct:.0f}%",
+                "Unique": _uniq,
+                "Sample values": _samples,
+            })
+        _qual_df = pd.DataFrame(_qual_rows)
+
+        def _color_fill(val):
+            try:
+                v = int(val.replace("%",""))
+                if v >= 95: return "color:#22c55e"
+                if v >= 70: return "color:#f59e0b"
+                return "color:#ef4444;font-weight:bold"
+            except Exception:
+                return ""
 
         st.dataframe(
-            _prof_df.style.applymap(_highlight_confidence, subset=["Confidence"]),
-            use_container_width=True, height=320,
+            _qual_df.style.applymap(_color_fill, subset=["Fill %"]),
+            use_container_width=True, height=280,
         )
 
-        # ── Interactive mapping editor ────────────────────────────────────────
-        st.markdown('<div class="sec-head">Edit Column Mapping</div>', unsafe_allow_html=True)
-        st.markdown('''
-<div style="font-size:11px;color:#64748b;font-family:monospace;margin-bottom:12px">
-  Review each column. Change the system field assignment or set to <b>Exclude</b> /
-  <b>Keep as raw_</b>. Confident mappings (≥70%) are pre-selected.
-</div>''', unsafe_allow_html=True)
+        if st.button("✅ Looks good — proceed to column mapping", type="primary", key="dp_s1_next"):
+            st.session_state["dp_step1_done"] = True
+            st.rerun()
 
-        # Build reverse mapping for current state
-        _reverse = {c: f for f, c in _dp_mapping.items()}
+    # ─────────────────────────────────────────────────────────────────────────
+    # STEP 2 — Column Mapping
+    # ─────────────────────────────────────────────────────────────────────────
+    if not st.session_state.get("dp_step1_done"):
+        st.stop()
+
+    with st.expander("🗺️ Step 2 — Map Columns to System Fields",
+                     expanded=not st.session_state.get("dp_step2_done", False)):
+        st.markdown("""
+<div style='font-size:12px;color:#64748b;font-family:monospace;margin-bottom:14px;
+     line-height:1.7'>
+  PharmaScan uses <b style='color:#e2e8f0'>named system fields</b> internally (e.g.
+  <code style='color:#00e5a0'>patient_id</code>, <code style='color:#00e5a0'>visit_date</code>).
+  The profiler below has auto-detected the best match for each column. Review and correct
+  anything misidentified — especially <b style='color:#0ea5e9'>RAMA Number</b> and
+  <b style='color:#0ea5e9'>Dispensing Date</b> which are required for all fraud detection.
+</div>""", unsafe_allow_html=True)
+
+        # Run auto-profiler (cached)
+        if "dp_auto_mapping" not in st.session_state or \
+                st.session_state.get("dp_auto_mapping_file") != _raw_fname:
+            with st.spinner("Profiling columns…"):
+                _auto_map, _auto_scores, _auto_profiles = auto_map_columns(_dp_df)
+            st.session_state["dp_auto_mapping"]      = _auto_map
+            st.session_state["dp_auto_scores"]       = _auto_scores
+            st.session_state["dp_auto_profiles"]     = _auto_profiles
+            st.session_state["dp_auto_mapping_file"] = _raw_fname
+
+        _auto_map      = st.session_state["dp_auto_mapping"]
+        _auto_scores   = st.session_state["dp_auto_scores"]
+        _auto_profiles = st.session_state["dp_auto_profiles"]
+
+        # Coverage metrics
+        _n_auto  = len(_auto_map)
+        _req_hit = sum(1 for f in _SYSTEM_FIELDS if _SYSTEM_FIELDS[f]["required"]
+                       and f in _auto_map)
+        _req_tot = sum(1 for f in _SYSTEM_FIELDS.values() if f["required"])
+        _am1, _am2, _am3 = st.columns(3)
+        _am1.metric("Auto-mapped", f"{_n_auto} / {len(_dp_df.columns)} columns")
+        _am2.metric("Required fields", f"{_req_hit} / {_req_tot}",
+                    delta=None if _req_hit == _req_tot else f"⚠ {_req_tot-_req_hit} missing")
+        _am3.metric("Unmapped", len(_dp_df.columns) - _n_auto)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # ── Build reverse map: col → field ────────────────────────────────────
+        _reverse_auto = {c: f for f, c in _auto_map.items()}
+
         _sys_field_options = (
-            ["— (keep as raw_)", "× exclude"] +
-            [f"{d['group']} › {f} — {d['label']}"
-             for f, d in _SYSTEM_FIELDS.items()]
+            ["— keep as raw column", "✕ exclude from lake"] +
+            [f"{_SYSTEM_FIELDS[f]['group']} › {f}  —  {_SYSTEM_FIELDS[f]['label']}"
+             for f in _SYSTEM_FIELDS]
         )
         _field_from_opt = {
-            f"{d['group']} › {f} — {d['label']}": f
-            for f, d in _SYSTEM_FIELDS.items()
+            f"{_SYSTEM_FIELDS[f]['group']} › {f}  —  {_SYSTEM_FIELDS[f]['label']}": f
+            for f in _SYSTEM_FIELDS
         }
 
-        _user_mapping = {}   # system_field -> original_col (from UI)
-        _exclude_cols = set()
+        _user_mapping  = {}
+        _exclude_cols  = set()
 
-        _grp_cols = {}
-        for col in _dp_df.columns:
-            fld = _reverse.get(col, "")
-            grp = (_SYSTEM_FIELDS[fld]["group"] if fld in _SYSTEM_FIELDS else "Unmapped")
-            _grp_cols.setdefault(grp, []).append(col)
+        # Group columns by their auto-mapped group
+        _grp_buckets = {}
+        for _col in _dp_df.columns:
+            _fld = _reverse_auto.get(_col, "")
+            _grp = _SYSTEM_FIELDS[_fld]["group"] if _fld in _SYSTEM_FIELDS else "Unmapped"
+            _grp_buckets.setdefault(_grp, []).append(_col)
 
-        _grp_order = _GROUPS_ORDER + ["Unmapped"]
-        for _grp in _grp_order:
-            _gcols = _grp_cols.get(_grp, [])
+        for _grp in _GROUPS_ORDER + ["Unmapped"]:
+            _gcols = _grp_buckets.get(_grp, [])
             if not _gcols:
                 continue
             _gc = _GROUP_COLORS.get(_grp, "#64748b")
-            st.markdown(
-                f'<div style="font-size:11px;font-weight:700;color:{_gc};'
-                f'text-transform:uppercase;letter-spacing:.06em;'
-                f'margin:16px 0 8px">{_grp}</div>',
-                unsafe_allow_html=True,
-            )
-            _row_cols = st.columns(3)
-            for _ci, col in enumerate(_gcols):
-                fld = _reverse.get(col, "")
-                conf = max(_dp_scores.get(col, {}).values(), default=0)
-                # Default select option
-                if fld in _SYSTEM_FIELDS:
-                    _default_opt = f"{_SYSTEM_FIELDS[fld]['group']} › {fld} — {_SYSTEM_FIELDS[fld]['label']}"
+            st.markdown(f"""
+<div style='display:flex;align-items:center;gap:10px;margin:18px 0 10px'>
+  <div style='height:1px;background:#1e2a38;flex:1'></div>
+  <span style='font-size:11px;font-weight:700;color:{_gc};
+       text-transform:uppercase;letter-spacing:.08em;
+       background:#0d1117;padding:0 10px'>{_grp}</span>
+  <div style='height:1px;background:#1e2a38;flex:1'></div>
+</div>""", unsafe_allow_html=True)
+
+            _row3 = st.columns(3)
+            for _ci, _col in enumerate(_gcols):
+                _fld  = _reverse_auto.get(_col, "")
+                _conf = max(_auto_scores.get(_col, {}).values(), default=0.0)
+                _prof = _auto_profiles.get(_col, {})
+                _samp = " · ".join(_prof.get("samples", [])[:3])[:48]
+
+                # Determine default option
+                if _fld in _SYSTEM_FIELDS:
+                    _def_opt = f"{_SYSTEM_FIELDS[_fld]['group']} › {_fld}  —  {_SYSTEM_FIELDS[_fld]['label']}"
                 else:
-                    _default_opt = "— (keep as raw_)"
+                    _def_opt = "— keep as raw column"
 
-                _conf_color = "#00e5a0" if conf >= 0.7 else "#f59e0b" if conf >= 0.4 else "#64748b"
-                _row_cols[_ci % 3].markdown(
-                    f'<div style="font-size:10px;color:{_conf_color};font-family:monospace;'
-                    f'margin-bottom:2px">{col[:40]} — {conf*100:.0f}% confidence</div>',
-                    unsafe_allow_html=True,
-                )
-                _sel = _row_cols[_ci % 3].selectbox(
-                    col[:30],
-                    options=_sys_field_options,
-                    index=(_sys_field_options.index(_default_opt)
-                           if _default_opt in _sys_field_options else 0),
-                    key=f"dp_map_{col}",
-                    label_visibility="collapsed",
-                )
-                if _sel == "× exclude":
-                    _exclude_cols.add(col)
-                elif _sel != "— (keep as raw_)":
-                    _f = _field_from_opt.get(_sel)
-                    if _f:
-                        _user_mapping[_f] = col
+                # Required field indicator
+                _is_req = _fld in _SYSTEM_FIELDS and _SYSTEM_FIELDS[_fld]["required"]
+                _req_badge = " <span style='color:#ef4444;font-size:9px'>REQUIRED</span>" if _is_req else ""
 
-        # ── Preview & Export ─────────────────────────────────────────────────
+                # Confidence colour
+                _cc = "#00e5a0" if _conf >= 0.7 else "#f59e0b" if _conf >= 0.35 else "#64748b"
+
+                with _row3[_ci % 3]:
+                    st.markdown(f"""
+<div style='background:#111720;border:1px solid #1e2a38;border-radius:8px;
+     padding:10px 12px;margin-bottom:6px'>
+  <div style='font-size:11px;font-weight:700;color:#e2e8f0;
+       font-family:monospace;margin-bottom:3px'>
+    {str(_col)[:38]}{_req_badge}
+  </div>
+  <div style='display:flex;gap:8px;margin-bottom:6px'>
+    <span style='font-size:10px;color:#475569;font-family:monospace'>
+      {_prof.get("dtype","?")} · {_prof.get("unique","?")} unique
+    </span>
+    <span style='font-size:10px;color:{_cc};font-family:monospace'>
+      {_conf*100:.0f}% confidence
+    </span>
+  </div>
+  <div style='font-size:10px;color:#334155;font-family:monospace;
+       white-space:nowrap;overflow:hidden;text-overflow:ellipsis'>
+    {_samp or "—"}
+  </div>
+</div>""", unsafe_allow_html=True)
+                    _sel = st.selectbox(
+                        _col,
+                        options=_sys_field_options,
+                        index=(_sys_field_options.index(_def_opt)
+                               if _def_opt in _sys_field_options else 0),
+                        key=f"dp_map_{_col}",
+                        label_visibility="collapsed",
+                    )
+                    if _sel == "✕ exclude from lake":
+                        _exclude_cols.add(_col)
+                    elif _sel != "— keep as raw column":
+                        _f2 = _field_from_opt.get(_sel)
+                        if _f2:
+                            _user_mapping[_f2] = _col
+
+        # Validate required fields
         st.markdown("<br>", unsafe_allow_html=True)
-        _ec1, _ec2 = st.columns([1, 2])
+        _missing_req = [f for f in _SYSTEM_FIELDS
+                        if _SYSTEM_FIELDS[f]["required"] and f not in _user_mapping]
 
-        with _ec1:
+        if _missing_req:
+            _mr_labels = ", ".join(
+                f"`{f}` ({_SYSTEM_FIELDS[f]['label']})" for f in _missing_req
+            )
+            st.warning(f"⚠️ Required fields not yet mapped: {_mr_labels}. "
+                       f"These are needed for fraud detection. You may still proceed "
+                       f"but some analysis modules will be unavailable.")
+
+        _s2c1, _s2c2 = st.columns([1,3])
+        with _s2c1:
             st.markdown(
-                f'<p style="font-size:12px;color:#64748b;font-family:monospace">'
+                f'<p style="font-size:11px;color:#64748b;font-family:monospace">'
                 f'{len(_user_mapping)} system fields mapped · {len(_exclude_cols)} excluded</p>',
                 unsafe_allow_html=True,
             )
-            _do_apply_dp = st.button("✅ Apply Mapping & Preview",
-                                      type="primary", key="dp_apply")
+            if st.button("✅ Confirm mapping", type="primary", key="dp_s2_next"):
+                st.session_state["dp_confirmed_mapping"] = dict(_user_mapping)
+                st.session_state["dp_confirmed_exclude"] = set(_exclude_cols)
+                st.session_state["dp_step2_done"]        = True
+                st.rerun()
 
-        if _do_apply_dp or st.session_state.get("dp_result") is not None:
-            if _do_apply_dp:
-                _clean = apply_column_mapping(
-                    _dp_df.drop(columns=list(_exclude_cols), errors="ignore"),
-                    _user_mapping,
-                )
-                st.session_state["dp_result"] = _clean
-                st.session_state["dp_map_used"] = _user_mapping
+    # ─────────────────────────────────────────────────────────────────────────
+    # STEP 3 — Review & Clean
+    # ─────────────────────────────────────────────────────────────────────────
+    if not st.session_state.get("dp_step2_done"):
+        st.stop()
 
-            _clean = st.session_state["dp_result"]
-            _map_used = st.session_state.get("dp_map_used", {})
+    _confirmed_map = st.session_state.get("dp_confirmed_mapping", {})
+    _confirmed_exc = st.session_state.get("dp_confirmed_exclude", set())
 
-            # Summary
-            st.success(
-                f"✅ Mapping applied. {len(_map_used)} system fields · "
-                f"{len([c for c in _clean.columns if c.startswith('raw_')])} raw_ columns preserved."
+    with st.expander("🔍 Step 3 — Review & Clean Data",
+                     expanded=not st.session_state.get("dp_step3_done", False)):
+
+        # Apply mapping to get preview df
+        _prev_clean = apply_column_mapping(
+            _dp_df.drop(columns=list(_confirmed_exc), errors="ignore"),
+            _confirmed_map,
+        )
+
+        _p1, _p2, _p3 = st.columns(3)
+        _p1.metric("Rows ready",           f"{len(_prev_clean):,}")
+        _p2.metric("System fields mapped", len(_confirmed_map))
+        _p3.metric("Columns excluded",     len(_confirmed_exc))
+
+        # ── Rapid-revisit window (needed for processing) ───────────────────
+        st.markdown('<div style="font-size:11px;font-weight:700;color:#64748b;'
+                    'text-transform:uppercase;letter-spacing:.06em;margin:14px 0 6px">'
+                    'Analysis Settings</div>', unsafe_allow_html=True)
+        _dp_r1, _dp_r2, _dp_r3 = st.columns(3)
+        with _dp_r1:
+            _dp_rapid_days = st.slider("Rapid revisit window (days)", 1, 30, 7,
+                                       key="dp_rapid_days",
+                                       help="Days between visits to flag as suspicious")
+        with _dp_r2:
+            _dp_top_n = st.slider("Top N for charts", 5, 25, 15, key="dp_top_n")
+
+        # ── Missing value summary ──────────────────────────────────────────
+        st.markdown('<div style="font-size:11px;font-weight:700;color:#64748b;'
+                    'text-transform:uppercase;letter-spacing:.06em;margin:14px 0 6px">'
+                    'Data Quality Check</div>', unsafe_allow_html=True)
+
+        _qual2 = []
+        for _c in _prev_clean.columns:
+            _null_n = int(_prev_clean[_c].isna().sum())
+            _null_p = round(100 * _null_n / max(len(_prev_clean), 1), 1)
+            _status = "✅ OK" if _null_p < 5 else "⚠️ Sparse" if _null_p < 30 else "🔴 High nulls"
+            _qual2.append({"Column": _c, "Nulls": _null_n,
+                           "Null %": f"{_null_p:.1f}%", "Status": _status})
+        st.dataframe(pd.DataFrame(_qual2), use_container_width=True, height=220)
+
+        # ── Data preview ──────────────────────────────────────────────────
+        st.markdown('<div style="font-size:11px;font-weight:700;color:#64748b;'
+                    'text-transform:uppercase;letter-spacing:.06em;margin:14px 0 6px">'
+                    'Prepared Data Preview (first 50 rows)</div>', unsafe_allow_html=True)
+        st.dataframe(_prev_clean.head(50), use_container_width=True, height=280)
+
+        # ── Column rename overrides ────────────────────────────────────────
+        with st.expander("🔧 Optional: rename raw_ columns", expanded=False):
+            st.markdown("""<div style='font-size:11px;color:#64748b;
+            font-family:monospace;margin-bottom:8px'>
+            Columns that were not mapped to a system field are kept with a
+            <code>raw_</code> prefix. You can give them friendlier names below.
+            Leave blank to keep the auto-generated name.</div>""",
+            unsafe_allow_html=True)
+            _raw_cols = [c for c in _prev_clean.columns if c.startswith("raw_")]
+            _rename_overrides = {}
+            if _raw_cols:
+                _rnc = st.columns(min(3, len(_raw_cols)))
+                for _ri, _rc in enumerate(_raw_cols):
+                    _new_name = _rnc[_ri % 3].text_input(
+                        _rc, value="", placeholder=f"{_rc}", key=f"dp_rename_{_rc}",
+                        label_visibility="visible",
+                    )
+                    if _new_name.strip():
+                        _rename_overrides[_rc] = _new_name.strip()
+            if _rename_overrides:
+                _prev_clean = _prev_clean.rename(columns=_rename_overrides)
+                st.session_state["dp_rename_overrides"] = _rename_overrides
+
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("✅ Data looks good — proceed to commit", type="primary", key="dp_s3_next"):
+            st.session_state["dp_step3_done"]     = True
+            st.session_state["dp_preview_clean"]  = _prev_clean
+            st.session_state["dp_rapid_days_val"] = _dp_rapid_days
+            st.session_state["dp_top_n_val"]      = _dp_top_n
+            st.rerun()
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # STEP 4 — Commit to Data Lake
+    # ─────────────────────────────────────────────────────────────────────────
+    if not st.session_state.get("dp_step3_done"):
+        st.stop()
+
+    _final_df        = st.session_state.get("dp_preview_clean",
+                           apply_column_mapping(
+                               _dp_df.drop(columns=list(_confirmed_exc), errors="ignore"),
+                               _confirmed_map))
+    _final_rapid     = st.session_state.get("dp_rapid_days_val", 7)
+    _final_top_n     = st.session_state.get("dp_top_n_val", 15)
+
+    # Apply any rename overrides
+    _renames = st.session_state.get("dp_rename_overrides", {})
+    if _renames:
+        _final_df = _final_df.rename(columns=_renames)
+
+    with st.expander("🚀 Step 4 — Commit to Data Lake", expanded=True):
+
+        # Final summary before commit
+        _f1, _f2, _f3, _f4 = st.columns(4)
+        _f1.metric("Rows to commit",      f"{len(_final_df):,}")
+        _f2.metric("System fields",       len(_confirmed_map))
+        _f3.metric("Total columns",       len(_final_df.columns))
+        _f4.metric("Rapid window",        f"{_final_rapid} days")
+
+        # Mapping summary chips
+        _chip_parts = []
+        for _fld, _orig in _confirmed_map.items():
+            _gc2 = _GROUP_COLORS.get(_SYSTEM_FIELDS.get(_fld, {}).get("group",""), "#64748b")
+            _chip_parts.append(
+                f'<span style="background:rgba(14,165,233,.07);border:1px solid #1e3a5f;'
+                f'border-radius:6px;padding:3px 9px;font-size:10px;'
+                f'font-family:monospace;color:{_gc2};margin:2px">'
+                f'{_fld} ← <span style="color:#475569">{str(_orig)[:22]}</span></span>'
+            )
+        if _chip_parts:
+            st.markdown(
+                f'<div style="display:flex;flex-wrap:wrap;gap:3px;margin:10px 0 16px">'
+                f'{"".join(_chip_parts)}</div>',
+                unsafe_allow_html=True,
             )
 
-            # Show mapped field chips
-            _chips_html = "".join(
-                f'<span style="background:rgba({",".join(str(int(c[1:3],16)) + "," + str(int(c[3:5],16)) + "," + str(int(c[5:],16)) for c in [_GROUP_COLORS.get(_SYSTEM_FIELDS.get(f,{}).get('group','Financial'),'#64748b')])},0.12);'
-                f'border:1px solid {_GROUP_COLORS.get(_SYSTEM_FIELDS.get(f,{}).get('group','Financial'),'#64748b')};'
-                f'border-radius:6px;padding:3px 10px;font-size:11px;font-family:monospace;'
-                f'color:{_GROUP_COLORS.get(_SYSTEM_FIELDS.get(f,{}).get('group','Financial'),'#64748b')};'
-                f'margin:2px">{f}</span>'
-                for f in _map_used
-                if f in _SYSTEM_FIELDS
+        # Download preview before committing
+        _dpc1, _dpc2 = st.columns(2)
+        with _dpc1:
+            _csv_prev = _final_df.to_csv(index=False).encode()
+            st.download_button("⬇️ Export prepared CSV first",
+                               data=_csv_prev,
+                               file_name=f"pharmascan_prepared_{_raw_fname.rsplit('.',1)[0]}.csv",
+                               mime="text/csv",
+                               key="dp_export_csv")
+        with _dpc2:
+            _map_preview = pd.DataFrame(
+                [(f, c, _SYSTEM_FIELDS.get(f, {}).get("label", "—"))
+                 for f, c in _confirmed_map.items()],
+                columns=["System Field", "Original Column", "Description"]
             )
-            if _chips_html:
-                st.markdown(
-                    f'<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:12px">{_chips_html}</div>',
-                    unsafe_allow_html=True,
-                )
+            st.download_button("⬇️ Export mapping report",
+                               data=_map_preview.to_csv(index=False).encode(),
+                               file_name="column_mapping_report.csv",
+                               mime="text/csv",
+                               key="dp_export_map")
 
-            # Preview table
-            st.markdown('<div class="sec-head">Prepared Data Preview</div>', unsafe_allow_html=True)
-            st.dataframe(_clean.head(100), use_container_width=True, height=380)
+        st.markdown("<br>", unsafe_allow_html=True)
 
-            # Downloads
-            _dc1, _dc2 = st.columns(2)
-            with _dc1:
-                _csv_dp = _clean.to_csv(index=False).encode()
-                st.download_button(
-                    "⬇️ Download prepared CSV",
-                    data=_csv_dp,
-                    file_name=f"pharmascan_prepared_{dp_upload.name.rsplit('.',1)[0]}.csv",
-                    mime="text/csv",
-                    key="dp_download_csv",
-                )
-            with _dc2:
-                _map_df = pd.DataFrame(
-                    [(f, c, _SYSTEM_FIELDS.get(f,{}).get('label','—'))
-                     for f,c in _map_used.items()],
-                    columns=["System Field","Original Column","Description"]
-                )
-                _csv_map = _map_df.to_csv(index=False).encode()
-                st.download_button(
-                    "⬇️ Download mapping report",
-                    data=_csv_map,
-                    file_name="column_mapping_report.csv",
-                    mime="text/csv",
-                    key="dp_download_map",
-                )
+        # ── THE COMMIT BUTTON ─────────────────────────────────────────────
+        st.markdown("""
+<div style='background:#030d1a;border:1px solid #1e3a5f;border-radius:12px;
+     padding:16px 20px;margin-bottom:16px'>
+  <div style='font-size:13px;font-weight:700;color:#38bdf8;margin-bottom:6px'>
+    ℹ️ What happens when you commit
+  </div>
+  <div style='font-size:11px;color:#64748b;font-family:monospace;line-height:1.9'>
+    • The prepared dataframe is stored in a <b style='color:#e2e8f0'>session-level data lake</b><br>
+    • All other tabs (Summary, Fraud Detection, Rules Engine, etc.) read exclusively from this lake<br>
+    • You can re-run Data Prep at any time to update the lake with a different mapping<br>
+    • Clearing the sidebar file upload or clicking <b style='color:#ef4444'>Clear Data Lake</b> resets everything
+  </div>
+</div>""", unsafe_allow_html=True)
 
-    else:
-        st.info("👆 Upload any Excel or CSV file above to begin column profiling.")
+        _commit_col, _reset_col = st.columns([2, 1])
+        with _commit_col:
+            _do_commit = st.button(
+                "🚀 Commit to Data Lake",
+                type="primary",
+                use_container_width=True,
+                key="dp_commit",
+            )
+        with _reset_col:
+            if st.button("↩ Re-do column mapping", use_container_width=True, key="dp_redo"):
+                for _k in ["dp_step1_done","dp_step2_done","dp_step3_done",
+                           "dp_confirmed_mapping","dp_confirmed_exclude",
+                           "dp_preview_clean","dp_rename_overrides"]:
+                    st.session_state.pop(_k, None)
+                st.rerun()
+
+        if _do_commit:
+            # Run load_and_process on the clean prepared data
+            with st.spinner("Processing data lake…"):
+                try:
+                    # Serialise the clean df to CSV bytes and reparse (ensures consistent types)
+                    _lake_bytes = _final_df.to_csv(index=False).encode()
+                    _lake_df, _lake_colmap, _lake_s, _lake_rg, _lake_rd, _lake_rapid = \
+                        load_and_process(_lake_bytes, "lake_data.csv", _final_rapid)
+
+                    from datetime import datetime as _dt
+                    st.session_state["data_lake"] = {
+                        "committed":      True,
+                        "df":             _lake_df,
+                        "stats":          _lake_s,
+                        "rapid":          _lake_rapid,
+                        "rapid_days":     _final_rapid,
+                        "repeat_groups":  _lake_rg,
+                        "repeat_detail":  _lake_rd,
+                        "col_map":        _lake_colmap,
+                        "top_n":          _final_top_n,
+                        "filename":       _raw_fname,
+                        "mapped_fields":  list(_confirmed_map.keys()),
+                        "committed_at":   _dt.now().strftime("%d/%m/%Y %H:%M"),
+                        "source_rows":    len(_final_df),
+                    }
+                    st.success(
+                        f"✅ Data lake committed! "
+                        f"**{len(_lake_df):,} rows** · **{len(_confirmed_map)} system fields** · "
+                        f"**{len(_lake_rapid)} rapid revisit pairs** detected."
+                    )
+                    st.balloons()
+                    st.markdown("""
+<div style='background:#031a0a;border:1px solid #16a34a;border-radius:10px;
+     padding:14px 18px;margin-top:12px;font-family:monospace;font-size:12px'>
+  <b style='color:#22c55e'>🎉 Data lake is now active!</b><br>
+  <span style='color:#16a34a'>Switch to any analysis tab — they all read from your committed data.</span>
+</div>""", unsafe_allow_html=True)
+                except Exception as _ce:
+                    st.error(f"❌ Commit failed: {_ce}")
+                    import traceback; st.code(traceback.format_exc())
+
+        # If already committed, show status
+        elif _dl_committed:
+            st.markdown(f"""
+<div style='background:#031a0a;border:1px solid #16a34a;border-radius:10px;
+     padding:14px 18px;font-family:monospace;font-size:12px'>
+  <b style='color:#22c55e'>✅ Data Lake is ACTIVE</b><br>
+  <span style='color:#64748b'>{_dl.get("source_rows",0):,} rows committed on
+  {_dl.get("committed_at","—")} from <b style='color:#e2e8f0'>{_dl.get("filename","—")}</b></span>
+</div>""", unsafe_allow_html=True)
+
+
 
 
 # ══ RULES ENGINE TAB ═════════════════════════════════════════════════════════
 with tab_rules:
+  if not _dl_committed:
+    _render_tab_locked("Rules Engine")
+  else:
     st.markdown('''
 <div style="background:#111720;border:1px solid #1e2a38;border-left:3px solid #ef4444;
      border-radius:10px;padding:14px 18px;margin-bottom:20px">
