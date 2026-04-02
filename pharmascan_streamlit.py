@@ -1,3 +1,12 @@
+"""
+PharmaScan — Pharmacy Voucher Intelligence (Streamlit Edition)
+
+Install:
+    pip install streamlit pandas matplotlib networkx openpyxl odfpy
+
+Run:
+    streamlit run pharmascan_streamlit.py
+"""
 
 import difflib
 import io
@@ -4060,9 +4069,8 @@ with tab_dataprep:
             except Exception:
                 return ""
 
-
         st.dataframe(
-            _qual_df.style.map(_color_fill, subset=["Fill %"])
+            _qual_df.style.applymap(_color_fill, subset=["Fill %"]),
             use_container_width=True, height=280,
         )
 
@@ -4071,163 +4079,212 @@ with tab_dataprep:
             st.rerun()
 
     # ─────────────────────────────────────────────────────────────────────────
-    # STEP 2 — Column Mapping
+    # STEP 2 — Manual Column Mapping
     # ─────────────────────────────────────────────────────────────────────────
     if not st.session_state.get("dp_step1_done"):
         st.stop()
 
     with st.expander("🗺️ Step 2 — Map Columns to System Fields",
                      expanded=not st.session_state.get("dp_step2_done", False)):
+
+        # ── Intro ─────────────────────────────────────────────────────────────
         st.markdown("""
-<div style='font-size:12px;color:#64748b;font-family:monospace;margin-bottom:14px;
-     line-height:1.7'>
-  PharmaScan uses <b style='color:#e2e8f0'>named system fields</b> internally (e.g.
-  <code style='color:#00e5a0'>patient_id</code>, <code style='color:#00e5a0'>visit_date</code>).
-  The profiler below has auto-detected the best match for each column. Review and correct
-  anything misidentified — especially <b style='color:#0ea5e9'>RAMA Number</b> and
-  <b style='color:#0ea5e9'>Dispensing Date</b> which are required for all fraud detection.
+<div style='background:#030d1a;border:1px solid #1e3a5f;border-radius:10px;
+     padding:14px 18px;margin-bottom:20px'>
+  <div style='font-size:13px;font-weight:700;color:#38bdf8;margin-bottom:8px'>
+    How to use this step
+  </div>
+  <div style='font-size:12px;color:#64748b;font-family:monospace;line-height:1.9'>
+    The left side lists every <b style='color:#e2e8f0'>system field</b> PharmaScan needs —
+    grouped by category. For each one, use the dropdown on the right to pick which
+    <b style='color:#e2e8f0'>column from your file</b> contains that data.<br>
+    Fields marked <span style='color:#ef4444;font-weight:700'>REQUIRED</span> must be
+    mapped for fraud detection to work.
+    Leave optional fields as <code style='color:#475569'>— not in this file</code> if they
+    don't exist in your data.
+  </div>
 </div>""", unsafe_allow_html=True)
 
-        # Run auto-profiler (cached)
-        if "dp_auto_mapping" not in st.session_state or \
-                st.session_state.get("dp_auto_mapping_file") != _raw_fname:
-            with st.spinner("Profiling columns…"):
-                _auto_map, _auto_scores, _auto_profiles = auto_map_columns(_dp_df)
-            st.session_state["dp_auto_mapping"]      = _auto_map
-            st.session_state["dp_auto_scores"]       = _auto_scores
-            st.session_state["dp_auto_profiles"]     = _auto_profiles
-            st.session_state["dp_auto_mapping_file"] = _raw_fname
+        # ── Build source column options ────────────────────────────────────────
+        # For each selectbox: blank option + every actual column in the file
+        _src_cols     = list(_dp_df.columns)
+        _col_none_opt = "— not in this file"
+        _col_options  = [_col_none_opt] + _src_cols
 
-        _auto_map      = st.session_state["dp_auto_mapping"]
-        _auto_scores   = st.session_state["dp_auto_scores"]
-        _auto_profiles = st.session_state["dp_auto_profiles"]
+        # Quick dtype + sample preview per source column (computed once)
+        _col_meta = {}
+        for _c in _src_cols:
+            _s_c = _dp_df[_c]
+            _dtype = str(_s_c.dtype)
+            _uniq  = int(_s_c.nunique())
+            _samp  = " · ".join(
+                str(v) for v in _s_c.dropna().head(3).tolist()
+            )[:55]
+            _null_pct = round(100 * _s_c.isna().sum() / max(len(_s_c), 1), 1)
+            _col_meta[_c] = {"dtype": _dtype, "unique": _uniq,
+                             "sample": _samp, "null_pct": _null_pct}
 
-        # Coverage metrics
-        _n_auto  = len(_auto_map)
-        _req_hit = sum(1 for f in _SYSTEM_FIELDS if _SYSTEM_FIELDS[f]["required"]
-                       and f in _auto_map)
-        _req_tot = sum(1 for f in _SYSTEM_FIELDS.values() if f["required"])
-        _am1, _am2, _am3 = st.columns(3)
-        _am1.metric("Auto-mapped", f"{_n_auto} / {len(_dp_df.columns)} columns")
-        _am2.metric("Required fields", f"{_req_hit} / {_req_tot}",
-                    delta=None if _req_hit == _req_tot else f"⚠ {_req_tot-_req_hit} missing")
-        _am3.metric("Unmapped", len(_dp_df.columns) - _n_auto)
+        # ── Mapping selectors — one per system field, grouped by category ─────
+        _user_mapping = {}   # field_name → source_col
 
-        st.markdown("<br>", unsafe_allow_html=True)
-
-        # ── Build reverse map: col → field ────────────────────────────────────
-        _reverse_auto = {c: f for f, c in _auto_map.items()}
-
-        _sys_field_options = (
-            ["— keep as raw column", "✕ exclude from lake"] +
-            [f"{_SYSTEM_FIELDS[f]['group']} › {f}  —  {_SYSTEM_FIELDS[f]['label']}"
-             for f in _SYSTEM_FIELDS]
-        )
-        _field_from_opt = {
-            f"{_SYSTEM_FIELDS[f]['group']} › {f}  —  {_SYSTEM_FIELDS[f]['label']}": f
-            for f in _SYSTEM_FIELDS
-        }
-
-        _user_mapping  = {}
-        _exclude_cols  = set()
-
-        # Group columns by their auto-mapped group
-        _grp_buckets = {}
-        for _col in _dp_df.columns:
-            _fld = _reverse_auto.get(_col, "")
-            _grp = _SYSTEM_FIELDS[_fld]["group"] if _fld in _SYSTEM_FIELDS else "Unmapped"
-            _grp_buckets.setdefault(_grp, []).append(_col)
-
-        for _grp in _GROUPS_ORDER + ["Unmapped"]:
-            _gcols = _grp_buckets.get(_grp, [])
-            if not _gcols:
+        for _grp in _GROUPS_ORDER:
+            _fields_in_grp = [(f, d) for f, d in _SYSTEM_FIELDS.items()
+                              if d["group"] == _grp]
+            if not _fields_in_grp:
                 continue
+
             _gc = _GROUP_COLORS.get(_grp, "#64748b")
+
+            # Section divider
             st.markdown(f"""
-<div style='display:flex;align-items:center;gap:10px;margin:18px 0 10px'>
+<div style='display:flex;align-items:center;gap:10px;margin:22px 0 14px'>
   <div style='height:1px;background:#1e2a38;flex:1'></div>
-  <span style='font-size:11px;font-weight:700;color:{_gc};
-       text-transform:uppercase;letter-spacing:.08em;
-       background:#0d1117;padding:0 10px'>{_grp}</span>
+  <span style='font-size:11px;font-weight:700;color:{_gc};text-transform:uppercase;
+       letter-spacing:.09em;background:#080c10;padding:0 12px'>{_grp}</span>
   <div style='height:1px;background:#1e2a38;flex:1'></div>
 </div>""", unsafe_allow_html=True)
 
-            _row3 = st.columns(3)
-            for _ci, _col in enumerate(_gcols):
-                _fld  = _reverse_auto.get(_col, "")
-                _conf = max(_auto_scores.get(_col, {}).values(), default=0.0)
-                _prof = _auto_profiles.get(_col, {})
-                _samp = " · ".join(_prof.get("samples", [])[:3])[:48]
+            for _fname, _fdef in _fields_in_grp:
+                _is_req   = _fdef["required"]
+                _req_pill = (
+                    "<span style='background:#450a0a;color:#fca5a5;font-size:9px;"
+                    "font-weight:700;padding:1px 6px;border-radius:4px;"
+                    "letter-spacing:.04em;margin-left:6px'>REQUIRED</span>"
+                ) if _is_req else (
+                    "<span style='background:#0d1117;color:#334155;font-size:9px;"
+                    "padding:1px 6px;border-radius:4px;margin-left:6px'>optional</span>"
+                )
 
-                # Determine default option
-                if _fld in _SYSTEM_FIELDS:
-                    _def_opt = f"{_SYSTEM_FIELDS[_fld]['group']} › {_fld}  —  {_SYSTEM_FIELDS[_fld]['label']}"
-                else:
-                    _def_opt = "— keep as raw column"
+                _left, _right = st.columns([2, 3])
 
-                # Required field indicator
-                _is_req = _fld in _SYSTEM_FIELDS and _SYSTEM_FIELDS[_fld]["required"]
-                _req_badge = " <span style='color:#ef4444;font-size:9px'>REQUIRED</span>" if _is_req else ""
-
-                # Confidence colour
-                _cc = "#00e5a0" if _conf >= 0.7 else "#f59e0b" if _conf >= 0.35 else "#64748b"
-
-                with _row3[_ci % 3]:
+                with _left:
                     st.markdown(f"""
-<div style='background:#111720;border:1px solid #1e2a38;border-radius:8px;
-     padding:10px 12px;margin-bottom:6px'>
-  <div style='font-size:11px;font-weight:700;color:#e2e8f0;
-       font-family:monospace;margin-bottom:3px'>
-    {str(_col)[:38]}{_req_badge}
+<div style='padding:10px 0 6px'>
+  <div style='font-size:13px;font-weight:700;color:#e2e8f0;
+       font-family:Syne,sans-serif;line-height:1.3'>
+    {_fdef["label"]}{_req_pill}
   </div>
-  <div style='display:flex;gap:8px;margin-bottom:6px'>
-    <span style='font-size:10px;color:#475569;font-family:monospace'>
-      {_prof.get("dtype","?")} · {_prof.get("unique","?")} unique
-    </span>
-    <span style='font-size:10px;color:{_cc};font-family:monospace'>
-      {_conf*100:.0f}% confidence
-    </span>
-  </div>
-  <div style='font-size:10px;color:#334155;font-family:monospace;
-       white-space:nowrap;overflow:hidden;text-overflow:ellipsis'>
-    {_samp or "—"}
+  <div style='font-size:10px;color:#475569;font-family:monospace;margin-top:4px'>
+    system key: <code style='color:{_gc}'>{_fname}</code>
   </div>
 </div>""", unsafe_allow_html=True)
-                    _sel = st.selectbox(
-                        _col,
-                        options=_sys_field_options,
-                        index=(_sys_field_options.index(_def_opt)
-                               if _def_opt in _sys_field_options else 0),
-                        key=f"dp_map_{_col}",
-                        label_visibility="collapsed",
-                    )
-                    if _sel == "✕ exclude from lake":
-                        _exclude_cols.add(_col)
-                    elif _sel != "— keep as raw column":
-                        _f2 = _field_from_opt.get(_sel)
-                        if _f2:
-                            _user_mapping[_f2] = _col
 
-        # Validate required fields
+                with _right:
+                    _sel_col = st.selectbox(
+                        label=_fname,
+                        options=_col_options,
+                        index=0,
+                        key=f"dp2_field_{_fname}",
+                        label_visibility="collapsed",
+                        help=f"Pick the column in your file that contains {_fdef['label']}",
+                    )
+
+                    # Show inline preview of selected column
+                    if _sel_col != _col_none_opt and _sel_col in _col_meta:
+                        _m = _col_meta[_sel_col]
+                        _fill_c = ("#22c55e" if _m["null_pct"] < 5
+                                   else "#f59e0b" if _m["null_pct"] < 30
+                                   else "#ef4444")
+                        st.markdown(f"""
+<div style='background:#111720;border:1px solid #1e2a38;border-radius:6px;
+     padding:6px 10px;margin-top:2px;font-family:monospace;font-size:10px;
+     display:flex;gap:16px;flex-wrap:wrap'>
+  <span style='color:#475569'>type: <b style='color:#94a3b8'>{_m["dtype"]}</b></span>
+  <span style='color:#475569'>unique: <b style='color:#94a3b8'>{_m["unique"]:,}</b></span>
+  <span style='color:#475569'>fill: <b style='color:{_fill_c}'>{100-_m["null_pct"]:.0f}%</b></span>
+  <span style='color:#334155;flex:1;overflow:hidden;text-overflow:ellipsis;
+       white-space:nowrap'>{_m["sample"] or "—"}</span>
+</div>""", unsafe_allow_html=True)
+                    elif _sel_col == _col_none_opt and _is_req:
+                        st.markdown(
+                            "<div style='font-size:10px;color:#7f1d1d;font-family:monospace;"
+                            "padding:4px 0'>⚠ Required — fraud detection will be limited</div>",
+                            unsafe_allow_html=True,
+                        )
+
+                    if _sel_col != _col_none_opt:
+                        _user_mapping[_fname] = _sel_col
+
+                # Light separator between fields within the same group
+                st.markdown(
+                    "<div style='height:1px;background:#0d1117;margin:2px 0'></div>",
+                    unsafe_allow_html=True,
+                )
+
+        # ── Extra columns — what to do with unmapped source cols ──────────────
+        _mapped_src_cols = set(_user_mapping.values())
+        _unmapped_src    = [c for c in _src_cols if c not in _mapped_src_cols]
+
+        if _unmapped_src:
+            st.markdown("""
+<div style='display:flex;align-items:center;gap:10px;margin:22px 0 14px'>
+  <div style='height:1px;background:#1e2a38;flex:1'></div>
+  <span style='font-size:11px;font-weight:700;color:#475569;text-transform:uppercase;
+       letter-spacing:.09em;background:#080c10;padding:0 12px'>Unmapped Columns</span>
+  <div style='height:1px;background:#1e2a38;flex:1'></div>
+</div>""", unsafe_allow_html=True)
+
+            st.markdown(f"""
+<div style='font-size:11px;color:#475569;font-family:monospace;margin-bottom:12px'>
+  {len(_unmapped_src)} column(s) from your file were not assigned to any system field.
+  Choose whether to keep each one (it will be stored with a
+  <code style='color:#64748b'>raw_</code> prefix) or exclude it from the data lake entirely.
+</div>""", unsafe_allow_html=True)
+
+            _exclude_cols = set()
+            _uc_rows = st.columns(3)
+            for _ui, _uc in enumerate(_unmapped_src):
+                _m = _col_meta.get(_uc, {})
+                with _uc_rows[_ui % 3]:
+                    _keep = st.checkbox(
+                        f"Keep  `{str(_uc)[:32]}`",
+                        value=True,
+                        key=f"dp2_keep_{_uc}",
+                        help=(
+                            f"dtype: {_m.get('dtype','?')}  |  "
+                            f"unique: {_m.get('unique','?')}  |  "
+                            f"sample: {_m.get('sample','—')[:60]}"
+                        ),
+                    )
+                    if not _keep:
+                        _exclude_cols.add(_uc)
+        else:
+            _exclude_cols = set()
+
+        # ── Validation + confirm ──────────────────────────────────────────────
         st.markdown("<br>", unsafe_allow_html=True)
+
         _missing_req = [f for f in _SYSTEM_FIELDS
                         if _SYSTEM_FIELDS[f]["required"] and f not in _user_mapping]
+        _mapped_count = len(_user_mapping)
+
+        # Status bar
+        _sb_mapped   = _mapped_count
+        _sb_optional = sum(1 for f in _SYSTEM_FIELDS
+                           if not _SYSTEM_FIELDS[f]["required"] and f in _user_mapping)
+        _sb_req_done = len(_SYSTEM_FIELDS) - len(_missing_req) - _sb_optional - \
+                       (len(_SYSTEM_FIELDS) - sum(1 for d in _SYSTEM_FIELDS.values()
+                                                  if d["required"]))
+
+        _vm1, _vm2, _vm3 = st.columns(3)
+        _vm1.metric("System fields mapped",   _mapped_count)
+        _vm2.metric("Required fields filled",
+                    f"{sum(1 for f in _SYSTEM_FIELDS if _SYSTEM_FIELDS[f]['required'] and f in _user_mapping)}"
+                    f" / {sum(1 for d in _SYSTEM_FIELDS.values() if d['required'])}")
+        _vm3.metric("Columns excluded",        len(_exclude_cols))
 
         if _missing_req:
-            _mr_labels = ", ".join(
-                f"`{f}` ({_SYSTEM_FIELDS[f]['label']})" for f in _missing_req
+            _mr_labels = "  ·  ".join(
+                f"{_SYSTEM_FIELDS[f]['label']}" for f in _missing_req
             )
-            st.warning(f"⚠️ Required fields not yet mapped: {_mr_labels}. "
-                       f"These are needed for fraud detection. You may still proceed "
-                       f"but some analysis modules will be unavailable.")
+            st.warning(
+                f"⚠️ Required fields not yet mapped: **{_mr_labels}**. "
+                f"You can still proceed, but fraud detection modules that need "
+                f"these fields will be unavailable."
+            )
 
-        _s2c1, _s2c2 = st.columns([1,3])
+        _s2c1, _s2c2 = st.columns([1, 3])
         with _s2c1:
-            st.markdown(
-                f'<p style="font-size:11px;color:#64748b;font-family:monospace">'
-                f'{len(_user_mapping)} system fields mapped · {len(_exclude_cols)} excluded</p>',
-                unsafe_allow_html=True,
-            )
             if st.button("✅ Confirm mapping", type="primary", key="dp_s2_next"):
                 st.session_state["dp_confirmed_mapping"] = dict(_user_mapping)
                 st.session_state["dp_confirmed_exclude"] = set(_exclude_cols)
