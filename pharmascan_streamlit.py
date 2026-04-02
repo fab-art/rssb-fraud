@@ -1270,7 +1270,9 @@ def apply_column_mapping(df: pd.DataFrame, mapping: dict) -> pd.DataFrame:
     Returns new df with system field names.
     """
     df = df.copy()
+    df.columns = df.columns.astype(str)   # ← guard against int/NaN column names
     rename = {}
+    
     for field, orig_col in mapping.items():
         if orig_col in df.columns:
             rename[orig_col] = field
