@@ -4062,7 +4062,7 @@ with tab_dataprep:
 
 
         st.dataframe(
-            _qual_df.style.map(_color_fill, subset=['Fill %'])
+            _qual_df.style.map(_color_fill, subset=["Fill %"])
             use_container_width=True, height=280,
         )
 
