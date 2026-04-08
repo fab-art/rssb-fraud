@@ -4576,7 +4576,7 @@ with tab_dataprep:
                         _clusters = detect_name_clusters(_doc_names, _doc_counts)
                     st.session_state["dp3_clusters"] = _clusters
 
-                         _clusters = st.session_state.get( "dp3_clusters ", [])
+                                   _clusters = st.session_state.get("dp3_clusters", [])
 
             # 🛠️ FIX: Recalculate counts here so they're available for the display loop
             _doc_counts = _prev_clean[_doc_col_dp].value_counts().to_dict()
