@@ -281,7 +281,10 @@ def load_and_process(file_bytes: bytes, filename: str, rapid_days: int):
                 rapid_dict["doctor"] = ["—"] * len(rapid_df)
             
             rapid = list(zip(*rapid_dict.values()))
-            rapid.sort(key=lambda x: x[3])  # Sort by days_apart
+            rapid_keys = list(rapid_dict.keys())
+            # Store as list of dicts for easier access downstream
+            rapid = [dict(zip(rapid_keys, row)) for row in rapid]
+            rapid.sort(key=lambda x: x["days_apart"])
         
         # Clean up temporary columns
         sub.drop(columns=["_prev_date", "_days_diff"], inplace=True, errors="ignore")
