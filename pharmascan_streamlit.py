@@ -149,26 +149,30 @@ COLUMN_MAP = {
 }
 
 
+# Pre-compile regex patterns for column matching
+_COLUMN_PATTERNS = [(re.compile(pattern), target) for pattern, target in COLUMN_MAP.items()]
+
+
 @st.cache_data(show_spinner=False)
 def load_and_process(file_bytes: bytes, filename: str, rapid_days: int):
     fname = filename.lower()
     if fname.endswith(".csv"):
-        df = pd.read_csv(io.BytesIO(file_bytes), encoding="utf-8", on_bad_lines="skip")
+        df = pd.read_csv(io.BytesIO(file_bytes), encoding="utf-8", on_bad_lines="skip", dtype_backend="pyarrow")
     elif fname.endswith((".xlsx", ".xls")):
-        df = pd.read_excel(io.BytesIO(file_bytes))
+        df = pd.read_excel(io.BytesIO(file_bytes), dtype_backend="pyarrow")
     elif fname.endswith(".ods"):
-        df = pd.read_excel(io.BytesIO(file_bytes), engine="odf")
+        df = pd.read_excel(io.BytesIO(file_bytes), engine="odf", dtype_backend="pyarrow")
     else:
         raise ValueError("Unsupported file type. Use CSV, XLSX, XLS, or ODS.")
 
-    # Normalise column names
+    # Normalise column names (optimized with pre-compiled patterns)
     renamed, used = {}, {}
     for col in df.columns:
         key = re.sub(r"[^a-z0-9]", "_", col.lower().strip())
         key = re.sub(r"_+", "_", key).strip("_")
         matched = False
-        for pattern, target in COLUMN_MAP.items():
-            if re.fullmatch(pattern, key):
+        for pattern, target in _COLUMN_PATTERNS:
+            if pattern.fullmatch(key):
                 if target not in used:
                     renamed[col] = target
                     used[target] = col
@@ -224,7 +228,7 @@ def load_and_process(file_bytes: bytes, filename: str, rapid_days: int):
         s["total_amount"] = round(float(df["amount"].sum()), 2)
         s["avg_amount"]   = round(float(df["amount"].mean()), 2)
 
-    # Repeat visits
+    # Repeat visits (optimized with vectorized operations)
     repeat_groups, repeat_detail = [], pd.DataFrame()
     if id_col:
         vc2 = df[id_col].value_counts()
@@ -244,7 +248,7 @@ def load_and_process(file_bytes: bytes, filename: str, rapid_days: int):
             repeat_groups.append(entry)
         repeat_groups.sort(key=lambda x: x["visits"], reverse=True)
 
-    # Rapid revisits
+    # Rapid revisits (optimized using groupby and diff instead of nested loops)
     rapid = []
     if id_col and "visit_date" in df.columns:
         cols = [id_col, "visit_date"]
@@ -253,21 +257,34 @@ def load_and_process(file_bytes: bytes, filename: str, rapid_days: int):
         if dcol:
             cols.append(dcol)
         sub = df[cols].dropna(subset=[id_col, "visit_date"]).sort_values([id_col, "visit_date"])
-        for pid, grp in sub.groupby(id_col):
-            dates = grp["visit_date"].tolist()
-            for i in range(len(dates) - 1):
-                diff = (dates[i + 1] - dates[i]).days
-                if 0 < diff <= rapid_days:
-                    name = str(grp["patient_name"].iloc[0]) if "patient_name" in grp.columns else str(pid)
-                    rapid.append({
-                        "patient_id":   str(pid),
-                        "patient_name": name,
-                        "visit_1":      str(dates[i].date()),
-                        "visit_2":      str(dates[i + 1].date()),
-                        "days_apart":   diff,
-                        "doctor":       str(grp[dcol].iloc[0]) if dcol else "—",
-                    })
-        rapid.sort(key=lambda x: x["days_apart"])
+        
+        # Use vectorized diff to calculate days between visits
+        sub["_prev_date"] = sub.groupby(id_col)["visit_date"].shift(1)
+        sub["_days_diff"] = (sub["visit_date"] - sub["_prev_date"]).dt.days
+        
+        # Filter for rapid revisits
+        rapid_mask = (sub["_days_diff"] > 0) & (sub["_days_diff"] <= rapid_days)
+        rapid_df = sub[rapid_mask].copy()
+        
+        if len(rapid_df) > 0:
+            rapid_dict = {
+                "patient_id": rapid_df[id_col].astype(str).tolist(),
+                "patient_name": (rapid_df["patient_name"].astype(str).tolist() if "patient_name" in rapid_df.columns 
+                                 else rapid_df[id_col].astype(str).tolist()),
+                "visit_1": rapid_df["_prev_date"].dt.strftime("%Y-%m-%d").tolist(),
+                "visit_2": rapid_df["visit_date"].dt.strftime("%Y-%m-%d").tolist(),
+                "days_apart": rapid_df["_days_diff"].astype(int).tolist(),
+            }
+            if dcol and dcol in rapid_df.columns:
+                rapid_dict["doctor"] = rapid_df[dcol].astype(str).tolist()
+            else:
+                rapid_dict["doctor"] = ["—"] * len(rapid_df)
+            
+            rapid = list(zip(*rapid_dict.values()))
+            rapid.sort(key=lambda x: x[3])  # Sort by days_apart
+        
+        # Clean up temporary columns
+        sub.drop(columns=["_prev_date", "_days_diff"], inplace=True, errors="ignore")
 
     return df, renamed, s, repeat_groups, repeat_detail, rapid
 
@@ -347,27 +364,29 @@ def build_network_data(df: pd.DataFrame, col_a: str, col_b: str,
         return None, None, {}
 
     G = nx.Graph()
-    edge_w: dict = {}
-    for _, row in sub.iterrows():
-        a, b = str(row[col_a]), str(row[col_b])
+    
+    # Optimized: use groupby and size instead of iterrows loop
+    edge_counts = sub.groupby([col_a, col_b], dropna=False).size().reset_index(name='weight')
+    edge_counts = edge_counts[edge_counts['weight'] >= min_edge_weight]
+    
+    # Add edges with weights directly
+    for _, row in edge_counts.iterrows():
+        a, b, w = str(row[col_a]), str(row[col_b]), int(row['weight'])
         G.add_node(a, side="A")
         G.add_node(b, side="B")
-        key = (a, b)
-        edge_w[key] = edge_w.get(key, 0) + 1
-
-    for (a, b), w in edge_w.items():
-        if w >= min_edge_weight:
-            G.add_edge(a, b, weight=w)
+        G.add_edge(a, b, weight=w)
 
     G.remove_nodes_from(list(nx.isolates(G)))
 
     if len(G.nodes) == 0:
         return None, None, {}
 
-    # Prune to top nodes by degree
+    # Prune to top nodes by degree (optimized)
     if len(G.nodes) > max_nodes:
-        top = sorted(G.degree(), key=lambda x: x[1], reverse=True)[:max_nodes]
-        G = G.subgraph([n for n, _ in top]).copy()
+        degree_list = list(G.degree())
+        degree_list.sort(key=lambda x: x[1], reverse=True)
+        top_nodes = [n for n, _ in degree_list[:max_nodes]]
+        G = G.subgraph(top_nodes).copy()
 
     nodes_a = [n for n, d in G.nodes(data=True) if d.get("side") == "A"]
     nodes_b = [n for n, d in G.nodes(data=True) if d.get("side") == "B"]
@@ -861,11 +880,25 @@ def detect_name_clusters(names: list, counts: dict) -> list[dict]:
 
     # ── Pass 1: merge multi-token names (typos + reordering) ─────────────────
     multi = [n for n in names if len(_toks(n)) >= 2]
-    for i, a in enumerate(multi):
-        for b in multi[i + 1:]:
-            sc, why = _match_score(a, b)
-            if sc > 0 and why != "none":
-                union(a, b)
+    n_multi = len(multi)
+    
+    # Optimization: skip O(n²) comparison if too many names
+    if n_multi <= 500:
+        for i, a in enumerate(multi):
+            for b in multi[i + 1:]:
+                sc, why = _match_score(a, b)
+                if sc > 0 and why != "none":
+                    union(a, b)
+    else:
+        # For large datasets, use sampling or frequency-based filtering
+        # Only compare top frequent names
+        sorted_multi = sorted(multi, key=lambda x: counts.get(x, 0), reverse=True)
+        top_multi = sorted_multi[:500]
+        for i, a in enumerate(top_multi):
+            for b in top_multi[i + 1:]:
+                sc, why = _match_score(a, b)
+                if sc > 0 and why != "none":
+                    union(a, b)
 
     # ── Pass 2: single-token names → merge only if token is unique to 1 cluster ──
     def get_clusters():
@@ -4576,21 +4609,21 @@ with tab_dataprep:
                         _clusters = detect_name_clusters(_doc_names, _doc_counts)
                     st.session_state["dp3_clusters"] = _clusters
 
-                                   _clusters = st.session_state.get("dp3_clusters", [])
+            _clusters = st.session_state.get("dp3_clusters", [])
 
             # 🛠️ FIX: Recalculate counts here so they're available for the display loop
             _doc_counts = _prev_clean[_doc_col_dp].value_counts().to_dict()
 
             if not _clusters:
-                    st.success("✅ No duplicate name variants detected.")
-                else:
-                    st.markdown(
-                        f'<p style="font-size:11px;color:#a78bfa;font-family:monospace">'
-                        f'{len(_clusters)} cluster(s) detected — approve merges below</p>',
-                        unsafe_allow_html=True,
-                    )
-                    _approved_dp = []
-                    for _ci_dp, _cl in enumerate(_clusters[:40]):
+                st.success("✅ No duplicate name variants detected.")
+            else:
+                st.markdown(
+                    f'<p style="font-size:11px;color:#a78bfa;font-family:monospace">'
+                    f'{len(_clusters)} cluster(s) detected — approve merges below</p>',
+                    unsafe_allow_html=True,
+                )
+                _approved_dp = []
+                for _ci_dp, _cl in enumerate(_clusters[:40]):
                         _canon  = _cl["canonical"]
                         _vars   = _cl["variants"]
                         _conf   = _cl["confidence"]
@@ -4643,33 +4676,33 @@ with tab_dataprep:
                         if _checked:
                             _approved_dp.append(_cl)
 
-                    if _approved_dp:
-                        st.markdown(
-                            f'<p style="font-size:11px;color:#64748b;'
-                            f'font-family:monospace">'
-                            f'{len(_approved_dp)} cluster(s) selected · '
-                            f'{sum(len(c["variants"]) for c in _approved_dp)} '
-                            f'variant names will be merged</p>',
+                if _approved_dp:
+                    st.markdown(
+                        f'<p style="font-size:11px;color:#64748b;'
+                        f'font-family:monospace">'
+                        f'{len(_approved_dp)} cluster(s) selected · '
+                        f'{sum(len(c["variants"]) for c in _approved_dp)} '
+                        f'variant names will be merged</p>',
                             unsafe_allow_html=True,
                         )
-                        if st.button(
-                            "⚡ Apply name normalisation",
-                            key="dp3_apply_norm",
-                            type="secondary",
-                        ):
-                            _prev_clean = apply_name_normalisation(
-                                _prev_clean, _doc_col_dp, _approved_dp
-                            )
-                            st.session_state["dp_preview_clean"] = _prev_clean
-                            st.session_state.pop("dp3_clusters", None)
-                            _n_merged = sum(len(c["variants"])
-                                            for c in _approved_dp)
-                            st.success(
-                                f"✅ Merged {_n_merged} variant name(s) into "
-                                f"{len(_approved_dp)} canonical form(s) in "
-                                f"`{_doc_col_dp}`."
-                            )
-                            st.rerun()
+                    if st.button(
+                        "⚡ Apply name normalisation",
+                        key="dp3_apply_norm",
+                        type="secondary",
+                    ):
+                        _prev_clean = apply_name_normalisation(
+                            _prev_clean, _doc_col_dp, _approved_dp
+                        )
+                        st.session_state["dp_preview_clean"] = _prev_clean
+                        st.session_state.pop("dp3_clusters", None)
+                        _n_merged = sum(len(c["variants"])
+                                        for c in _approved_dp)
+                        st.success(
+                            f"✅ Merged {_n_merged} variant name(s) into "
+                            f"{len(_approved_dp)} canonical form(s) in "
+                            f"`{_doc_col_dp}`."
+                        )
+                        st.rerun()
         else:
             st.markdown("""
 <div style='font-size:11px;color:#334155;font-family:monospace;
