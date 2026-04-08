@@ -4736,6 +4736,22 @@ with tab_dataprep:
         if _rename_overrides:
             _prev_clean = _prev_clean.rename(columns=_rename_overrides)
             st.session_state["dp_rename_overrides"] = _rename_overrides
+        
+        # ── Confirm Step 3 and proceed to Step 4 ───────────────────────────
+        st.markdown("<br>", unsafe_allow_html=True)
+        _s3c1, _s3c2 = st.columns([1, 3])
+        with _s3c1:
+            if st.button("✅ Confirm & Proceed to Commit", type="primary", key="dp_s3_next"):
+                st.session_state["dp_preview_clean"]   = _prev_clean
+                st.session_state["dp_rapid_days_val"]  = _dp_rapid_days
+                st.session_state["dp_top_n_val"]       = _dp_top_n
+                st.session_state["dp_step3_done"]      = True
+                st.rerun()
+        with _s3c2:
+            if st.button("↩ Back to mapping", key="dp_s3_back"):
+                st.session_state.pop("dp_step3_done", None)
+                st.session_state.pop("dp_step2_done", None)
+                st.rerun()
     # ─────────────────────────────────────────────────────────────────────────
     # STEP 4 — Commit to Data Lake
     # ─────────────────────────────────────────────────────────────────────────
