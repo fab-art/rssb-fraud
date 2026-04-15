@@ -248,6 +248,13 @@ def load_and_process(file_bytes: bytes, filename: str, rapid_days: int):
             repeat_groups.append(entry)
         repeat_groups.sort(key=lambda x: x["visits"], reverse=True)
 
+    # Fuzzy duplicate detection (RAMA + name)
+    fuzzy_repeat_groups: list = []
+    try:
+        fuzzy_repeat_groups = detect_fuzzy_repeat_patients(df)
+    except Exception:
+        fuzzy_repeat_groups = []
+
     # Rapid revisits (optimized using groupby and diff instead of nested loops)
     rapid = []
     if id_col and "visit_date" in df.columns:
@@ -289,7 +296,7 @@ def load_and_process(file_bytes: bytes, filename: str, rapid_days: int):
         # Clean up temporary columns
         sub.drop(columns=["_prev_date", "_days_diff"], inplace=True, errors="ignore")
 
-    return df, renamed, s, repeat_groups, repeat_detail, rapid
+    return df, renamed, s, repeat_groups, repeat_detail, rapid, fuzzy_repeat_groups
 
 
 # ── Chart helpers ─────────────────────────────────────────────────────────────
@@ -974,6 +981,215 @@ def apply_name_normalisation(df: pd.DataFrame, col: str,
             mapping[v] = c["canonical"]
     df[col] = df[col].map(lambda x: mapping.get(x, x))
     return df
+
+
+# ── RAMA / Patient-ID fuzzy helpers ──────────────────────────────────────────
+
+def _norm_rama(rama_str: str) -> str:
+    """Normalise a RAMA/patient-ID string for comparison (strip non-alphanumeric)."""
+    return re.sub(r"[^a-z0-9]", "", str(rama_str).lower().strip())
+
+
+def _rama_similarity(a: str, b: str) -> float:
+    """
+    Similarity score (0-1) between two RAMA numbers.
+    Returns 1.0 for exact match, 0.0 if lengths differ by > 2 chars, else
+    SequenceMatcher ratio on the normalised strings.
+    """
+    na, nb = _norm_rama(a), _norm_rama(b)
+    if not na or not nb:
+        return 0.0
+    if na == nb:
+        return 1.0
+    if abs(len(na) - len(nb)) > 2:
+        return 0.0
+    return difflib.SequenceMatcher(None, na, nb).ratio()
+
+
+def detect_fuzzy_repeat_patients(
+    df: pd.DataFrame,
+    name_thresh: float = 0.82,
+    rama_thresh: float = 0.88,
+) -> list[dict]:
+    """
+    Detect duplicate / repeat patients using a combination of:
+      • Exact RAMA-number match
+      • Fuzzy RAMA-number match  (similarity ≥ rama_thresh)
+      • Fuzzy patient-name match  (similarity ≥ name_thresh)
+
+    Returns a list of dicts, each representing a group of suspected
+    duplicate patients:
+      {
+        "canonical_id":   str,   # most-common patient_id in the group
+        "canonical_name": str,   # most-common patient_name in the group
+        "members":        [ {patient_id, patient_name, visits, match_type, confidence} ],
+        "match_types":    set,   # e.g. {"EXACT_RAMA", "FUZZY_NAME"}
+        "confidence":     float, # average pairwise confidence
+        "total_visits":   int,
+      }
+    Only groups with ≥ 2 distinct (id, name) pairs are returned.
+    """
+    has_id   = "patient_id"   in df.columns
+    has_name = "patient_name" in df.columns
+
+    if not has_id and not has_name:
+        return []
+
+    # ── Build unique (patient_id, patient_name, visit_count) records ─────────
+    group_cols = []
+    if has_id:   group_cols.append("patient_id")
+    if has_name: group_cols.append("patient_name")
+
+    agg = df.groupby(group_cols, dropna=False).size().reset_index(name="_visits")
+
+    # Coerce to string; replace NaN-like values with empty string
+    if has_id:
+        agg["patient_id"]   = agg["patient_id"].fillna("").astype(str).str.strip()
+    if has_name:
+        agg["patient_name"] = agg["patient_name"].fillna("").astype(str).str.strip()
+
+    records = agg.to_dict("records")
+    n = len(records)
+    if n < 2:
+        return []
+
+    # ── Union-Find (path compression) ────────────────────────────────────────
+    parent = list(range(n))
+
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a, b):
+        pa, pb = find(a), find(b)
+        if pa != pb:
+            parent[pb] = pa
+
+    # Store match metadata per pair for confidence/type tracking
+    pair_meta: dict[tuple[int, int], tuple[float, str]] = {}
+
+    # Cap at 800 records to keep O(n²) feasible; prioritise by visit count
+    if n > 800:
+        records = sorted(records, key=lambda r: -r.get("_visits", 0))[:800]
+        n = 800
+
+    # ── Pairwise comparison ───────────────────────────────────────────────────
+    for i in range(n):
+        ri = records[i]
+        id_i   = ri.get("patient_id",   "") if has_id   else ""
+        nam_i  = ri.get("patient_name", "") if has_name else ""
+        norm_i = _norm_rama(id_i)
+
+        for j in range(i + 1, n):
+            rj = records[j]
+            id_j   = rj.get("patient_id",   "") if has_id   else ""
+            nam_j  = rj.get("patient_name", "") if has_name else ""
+            norm_j = _norm_rama(id_j)
+
+            match_type = None
+            confidence = 0.0
+
+            # 1) Exact RAMA match (non-empty)
+            if has_id and norm_i and norm_j and norm_i == norm_j:
+                match_type = "EXACT_RAMA"
+                confidence = 1.0
+
+            # 2) Fuzzy RAMA match
+            elif has_id and norm_i and norm_j:
+                rs = _rama_similarity(id_i, id_j)
+                if rs >= rama_thresh:
+                    match_type = "FUZZY_RAMA"
+                    confidence = rs
+
+            # 3) Fuzzy name match
+            if has_name and nam_i and nam_j:
+                ns, _why = _match_score(nam_i, nam_j)
+                if ns >= name_thresh:
+                    if match_type is None:
+                        match_type = "FUZZY_NAME"
+                        confidence = ns
+                    else:
+                        # Both RAMA and name match → strongest signal
+                        match_type = "MULTI_MATCH"
+                        confidence = round((confidence + ns) / 2, 4)
+
+            if match_type:
+                union(i, j)
+                key = (min(i, j), max(i, j))
+                # Keep highest-confidence label for this pair
+                if key not in pair_meta or confidence > pair_meta[key][0]:
+                    pair_meta[key] = (confidence, match_type)
+
+    # ── Build result groups ───────────────────────────────────────────────────
+    from collections import defaultdict as _dfd
+    clusters: dict[int, list[int]] = _dfd(list)
+    for idx in range(n):
+        clusters[find(idx)].append(idx)
+
+    results = []
+    for root, members_idx in clusters.items():
+        if len(members_idx) < 2:
+            continue
+
+        # Collect pairwise metadata within this cluster
+        cluster_types: set = set()
+        cluster_confs: list = []
+        for ii in range(len(members_idx)):
+            for jj in range(ii + 1, len(members_idx)):
+                key = (min(members_idx[ii], members_idx[jj]),
+                       max(members_idx[ii], members_idx[jj]))
+                if key in pair_meta:
+                    conf, mtype = pair_meta[key]
+                    cluster_types.add(mtype)
+                    cluster_confs.append(conf)
+
+        avg_conf = round(sum(cluster_confs) / len(cluster_confs), 3) if cluster_confs else 0.0
+
+        # Canonical ID/name = most frequent member
+        member_records = [records[i] for i in members_idx]
+        canonical_id   = max(
+            (r.get("patient_id",   "") for r in member_records),
+            key=lambda x: sum(r.get("patient_id","") == x for r in member_records),
+        ) if has_id else ""
+        canonical_name = max(
+            (r.get("patient_name", "") for r in member_records),
+            key=lambda x: sum(r.get("patient_name","") == x for r in member_records),
+        ) if has_name else ""
+
+        total_visits = sum(r.get("_visits", 0) for r in member_records)
+
+        members_out = []
+        for r in member_records:
+            # find best match_type for this member vs canonical
+            best_type = "UNKNOWN"
+            best_conf = 0.0
+            idx_r = records.index(r) if r in records else -1
+            for key, (c, t) in pair_meta.items():
+                if idx_r in key:
+                    if c > best_conf:
+                        best_conf = c
+                        best_type = t
+            members_out.append({
+                "patient_id":   r.get("patient_id",   ""),
+                "patient_name": r.get("patient_name", ""),
+                "visits":       int(r.get("_visits", 0)),
+                "match_type":   best_type,
+                "confidence":   round(best_conf, 3),
+            })
+
+        results.append({
+            "canonical_id":   canonical_id,
+            "canonical_name": canonical_name,
+            "members":        members_out,
+            "match_types":    cluster_types,
+            "confidence":     avg_conf,
+            "total_visits":   int(total_visits),
+        })
+
+    results.sort(key=lambda x: (-x["confidence"], -x["total_visits"]))
+    return results
 
 
 
@@ -2292,6 +2508,7 @@ if _dl_committed:
     rapid_days = _dl["rapid_days"]
     repeat_groups  = _dl["repeat_groups"]
     repeat_detail  = _dl["repeat_detail"]
+    fuzzy_repeat_groups = _dl.get("fuzzy_repeat_groups", [])
     col_map        = _dl["col_map"]
     top_n          = st.session_state.get("sb_top_n", _dl.get("top_n", 15))
 else:
@@ -2302,6 +2519,7 @@ else:
     rapid_days = 7
     repeat_groups = []
     repeat_detail = pd.DataFrame()
+    fuzzy_repeat_groups = []
     col_map = {}
 
 # ── Helper: render a locked-tab placeholder ───────────────────────────────────
@@ -2428,7 +2646,7 @@ with tab_repeat:
     # ── Sub-tab style: two internal sections via radio ─────────────────────
     _rp_section = st.radio(
         "View",
-        ["🔁 Repeat Patients", "⚡ Rapid Revisits"],
+        ["🔁 Repeat Patients", "🔬 Fuzzy Duplicates", "⚡ Rapid Revisits"],
         horizontal=True,
         label_visibility="collapsed",
         key="rp_section",
@@ -2586,7 +2804,215 @@ with tab_repeat:
             )
 
     # ────────────────────────────────────────────────────────────────────────
-    # SECTION B — Rapid Revisits
+    # SECTION B — Fuzzy Duplicate Detection
+    # ────────────────────────────────────────────────────────────────────────
+    elif _rp_section == "🔬 Fuzzy Duplicates":
+        st.markdown("""
+<div class='info-banner'>
+  <b>🔬 Fuzzy Duplicate Detection</b><br>
+  This section flags patient records that appear to be the <b>same person</b> registered
+  under slightly different identifiers — catching <b>RAMA number typos</b> (e.g. <code>RW001234</code>
+  vs <code>RW00l234</code>) and <b>name spelling variations</b> (e.g. <i>Uwimana Jean</i> vs
+  <i>Jean Uwimana</i>). Both signals are combined for the highest confidence.
+</div>""", unsafe_allow_html=True)
+
+        if not fuzzy_repeat_groups:
+            st.success("✅ No fuzzy duplicates detected — all patient identifiers appear unique.")
+        else:
+            # ── Badge colour map ──────────────────────────────────────────────
+            _BADGE_COLORS = {
+                "EXACT_RAMA":  ("#ef4444", "#2d0a0a"),   # red — exact ID clash
+                "FUZZY_RAMA":  ("#f59e0b", "#2d1a00"),   # amber — near-ID match
+                "FUZZY_NAME":  ("#0ea5e9", "#001a2d"),   # blue — name similarity
+                "MULTI_MATCH": ("#a78bfa", "#160d2d"),   # purple — both signals
+                "UNKNOWN":     ("#64748b", "#111720"),
+            }
+            def _badge_html(match_type: str, confidence: float) -> str:
+                fg, bg = _BADGE_COLORS.get(match_type, _BADGE_COLORS["UNKNOWN"])
+                label = {
+                    "EXACT_RAMA":  "🔴 Exact RAMA",
+                    "FUZZY_RAMA":  "🟡 Fuzzy RAMA",
+                    "FUZZY_NAME":  "🔵 Fuzzy Name",
+                    "MULTI_MATCH": "🟣 Multi-Match",
+                }.get(match_type, match_type)
+                return (
+                    f'<span style="background:{bg};border:1px solid {fg};border-radius:5px;'
+                    f'padding:2px 8px;font-size:10px;font-family:monospace;color:{fg}'
+                    f';margin-right:4px">{label}</span>'
+                    f'<span style="font-size:10px;color:#64748b">{confidence:.0%} confidence</span>'
+                )
+
+            # ── KPI strip ─────────────────────────────────────────────────────
+            _fq1, _fq2, _fq3, _fq4 = st.columns(4)
+            _n_exact  = sum(1 for g in fuzzy_repeat_groups if "EXACT_RAMA"  in g["match_types"])
+            _n_frama  = sum(1 for g in fuzzy_repeat_groups if "FUZZY_RAMA"  in g["match_types"])
+            _n_fname  = sum(1 for g in fuzzy_repeat_groups if "FUZZY_NAME"  in g["match_types"])
+            _n_multi  = sum(1 for g in fuzzy_repeat_groups if "MULTI_MATCH" in g["match_types"])
+            _fq1.metric("Duplicate Groups",    len(fuzzy_repeat_groups))
+            _fq2.metric("Exact RAMA Clash",    _n_exact,
+                        delta="⚠ possible ID reuse" if _n_exact else None,
+                        delta_color="inverse" if _n_exact else "normal")
+            _fq3.metric("Fuzzy RAMA / Name",   _n_frama + _n_fname)
+            _fq4.metric("Multi-Signal (both)", _n_multi,
+                        delta="⚠ high-confidence dup" if _n_multi else None,
+                        delta_color="inverse" if _n_multi else "normal")
+
+            # ── Filter controls ───────────────────────────────────────────────
+            _fz_c1, _fz_c2, _fz_c3 = st.columns([3, 2, 1])
+            with _fz_c1:
+                _fz_srch = st.text_input(
+                    "🔍 Filter by name or RAMA",
+                    key="fz_search",
+                    placeholder="Patient name, RAMA number…",
+                )
+            with _fz_c2:
+                _fz_type = st.multiselect(
+                    "Match type",
+                    ["EXACT_RAMA", "FUZZY_RAMA", "FUZZY_NAME", "MULTI_MATCH"],
+                    default=[],
+                    key="fz_type",
+                    placeholder="All types",
+                )
+            with _fz_c3:
+                _fz_min_conf = st.slider(
+                    "Min confidence", 0.50, 1.00, 0.80, 0.01, key="fz_conf",
+                )
+
+            # ── Apply filters ─────────────────────────────────────────────────
+            _fz_groups = fuzzy_repeat_groups
+            if _fz_srch:
+                _fz_groups = [
+                    g for g in _fz_groups
+                    if _fz_srch.lower() in g["canonical_name"].lower()
+                    or _fz_srch.lower() in g["canonical_id"].lower()
+                    or any(
+                        _fz_srch.lower() in m["patient_name"].lower()
+                        or _fz_srch.lower() in m["patient_id"].lower()
+                        for m in g["members"]
+                    )
+                ]
+            if _fz_type:
+                _fz_groups = [
+                    g for g in _fz_groups
+                    if g["match_types"] & set(_fz_type)
+                ]
+            _fz_groups = [g for g in _fz_groups if g["confidence"] >= _fz_min_conf]
+
+            st.caption(
+                f"{len(_fz_groups):,} duplicate group(s) shown · "
+                f"🔴 Exact RAMA: {_n_exact} · 🟡 Fuzzy RAMA: {_n_frama} · "
+                f"🔵 Fuzzy Name: {_n_fname} · 🟣 Multi: {_n_multi}"
+            )
+
+            # ── Render each group as a card ───────────────────────────────────
+            for _gi, _grp in enumerate(_fz_groups[:200]):
+                _mts = _grp["match_types"]
+                # Card border colour priority: MULTI > EXACT > FUZZY_RAMA > NAME
+                _card_col = (
+                    "#a78bfa" if "MULTI_MATCH" in _mts
+                    else "#ef4444" if "EXACT_RAMA" in _mts
+                    else "#f59e0b" if "FUZZY_RAMA" in _mts
+                    else "#0ea5e9"
+                )
+
+                # Top badge line
+                _badges = " ".join(
+                    _badge_html(mt, _grp["confidence"])
+                    for mt in sorted(_mts)
+                )
+
+                # Members table HTML
+                _rows_html = ""
+                for _m in _grp["members"]:
+                    _mfg, _mbg = _BADGE_COLORS.get(_m["match_type"], _BADGE_COLORS["UNKNOWN"])
+                    _rows_html += (
+                        f'<tr style="border-bottom:1px solid #1e2a38">'
+                        f'<td style="padding:5px 8px;font-family:monospace;font-size:11px;color:#e2e8f0">'
+                        f'{_m["patient_name"] or "—"}</td>'
+                        f'<td style="padding:5px 8px;font-family:monospace;font-size:11px;color:#94a3b8">'
+                        f'{_m["patient_id"] or "—"}</td>'
+                        f'<td style="padding:5px 8px;text-align:center;font-size:11px;color:#e2e8f0">'
+                        f'{_m["visits"]}</td>'
+                        f'<td style="padding:5px 8px">'
+                        f'<span style="background:{_mbg};border:1px solid {_mfg};border-radius:4px;'
+                        f'padding:1px 6px;font-size:9px;color:{_mfg};font-family:monospace">'
+                        f'{_m["match_type"]}</span></td>'
+                        f'<td style="padding:5px 8px;text-align:center;font-size:11px;color:{_mfg}">'
+                        f'{_m["confidence"]:.0%}</td>'
+                        f'</tr>'
+                    )
+
+                st.markdown(f"""
+<div style='background:#111720;border:1px solid #1e2a38;border-left:4px solid {_card_col};
+     border-radius:10px;padding:14px 16px;margin-bottom:14px'>
+  <div style='display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px'>
+    <div>
+      <span style='font-size:13px;font-weight:700;color:#e2e8f0'>
+        {_grp['canonical_name'] or '(unknown name)'}
+      </span>
+      <span style='font-family:monospace;font-size:10px;color:#64748b;margin-left:10px'>
+        ID: {_grp['canonical_id'] or '—'}
+      </span>
+    </div>
+    <div style='text-align:right'>
+      <span style='font-size:18px;font-weight:800;color:{_card_col};font-family:Syne,sans-serif'>
+        {len(_grp['members'])}
+      </span>
+      <span style='font-size:10px;color:#64748b'> records · </span>
+      <span style='font-size:12px;color:#64748b'>{_grp['total_visits']} total visits</span>
+    </div>
+  </div>
+  <div style='margin-bottom:10px'>{_badges}</div>
+  <table style='width:100%;border-collapse:collapse'>
+    <thead>
+      <tr style='border-bottom:1px solid #1e2a38'>
+        <th style='padding:4px 8px;text-align:left;font-size:10px;color:#64748b;
+             font-family:monospace;font-weight:600'>PATIENT NAME</th>
+        <th style='padding:4px 8px;text-align:left;font-size:10px;color:#64748b;
+             font-family:monospace;font-weight:600'>RAMA / ID</th>
+        <th style='padding:4px 8px;text-align:center;font-size:10px;color:#64748b;
+             font-family:monospace;font-weight:600'>VISITS</th>
+        <th style='padding:4px 8px;text-align:left;font-size:10px;color:#64748b;
+             font-family:monospace;font-weight:600'>MATCH TYPE</th>
+        <th style='padding:4px 8px;text-align:center;font-size:10px;color:#64748b;
+             font-family:monospace;font-weight:600'>CONF</th>
+      </tr>
+    </thead>
+    <tbody>{_rows_html}</tbody>
+  </table>
+</div>""", unsafe_allow_html=True)
+
+            if len(_fz_groups) == 0:
+                st.info("No groups match the current filters.")
+
+            # Download fuzzy report
+            if fuzzy_repeat_groups:
+                _fz_rows = []
+                for _g in fuzzy_repeat_groups:
+                    for _m in _g["members"]:
+                        _fz_rows.append({
+                            "canonical_name":  _g["canonical_name"],
+                            "canonical_id":    _g["canonical_id"],
+                            "patient_name":    _m["patient_name"],
+                            "patient_id":      _m["patient_id"],
+                            "visits":          _m["visits"],
+                            "match_type":      _m["match_type"],
+                            "confidence":      _m["confidence"],
+                            "group_match_types": "|".join(sorted(_g["match_types"])),
+                            "group_confidence":  _g["confidence"],
+                            "total_visits":    _g["total_visits"],
+                        })
+                _fz_dl = pd.DataFrame(_fz_rows).to_csv(index=False).encode()
+                st.download_button(
+                    "⬇️ Download fuzzy duplicate report",
+                    data=_fz_dl,
+                    file_name="pharmascan_fuzzy_duplicates.csv",
+                    mime="text/csv",
+                    key="dl_fuzzy",
+                )
+
+    # ────────────────────────────────────────────────────────────────────────
+    # SECTION C — Rapid Revisits
     # ────────────────────────────────────────────────────────────────────────
     else:
         if not rapid:
@@ -4679,24 +5105,25 @@ with tab_dataprep:
                 try:
                     # Serialise the clean df to CSV bytes and reparse (ensures consistent types)
                     _lake_bytes = _final_df.to_csv(index=False).encode()
-                    _lake_df, _lake_colmap, _lake_s, _lake_rg, _lake_rd, _lake_rapid = \
+                    _lake_df, _lake_colmap, _lake_s, _lake_rg, _lake_rd, _lake_rapid, _lake_frg = \
                         load_and_process(_lake_bytes, "lake_data.csv", _final_rapid)
 
                     from datetime import datetime as _dt
                     st.session_state["data_lake"] = {
-                        "committed":      True,
-                        "df":             _lake_df,
-                        "stats":          _lake_s,
-                        "rapid":          _lake_rapid,
-                        "rapid_days":     _final_rapid,
-                        "repeat_groups":  _lake_rg,
-                        "repeat_detail":  _lake_rd,
-                        "col_map":        _lake_colmap,
-                        "top_n":          _final_top_n,
-                        "filename":       _raw_fname,
-                        "mapped_fields":  list(_confirmed_map.keys()),
-                        "committed_at":   _dt.now().strftime("%d/%m/%Y %H:%M"),
-                        "source_rows":    len(_final_df),
+                        "committed":           True,
+                        "df":                  _lake_df,
+                        "stats":               _lake_s,
+                        "rapid":               _lake_rapid,
+                        "rapid_days":          _final_rapid,
+                        "repeat_groups":       _lake_rg,
+                        "repeat_detail":       _lake_rd,
+                        "fuzzy_repeat_groups": _lake_frg,
+                        "col_map":             _lake_colmap,
+                        "top_n":               _final_top_n,
+                        "filename":            _raw_fname,
+                        "mapped_fields":       list(_confirmed_map.keys()),
+                        "committed_at":        _dt.now().strftime("%d/%m/%Y %H:%M"),
+                        "source_rows":         len(_final_df),
                     }
                     st.success(
                         f"✅ Data lake committed! "
