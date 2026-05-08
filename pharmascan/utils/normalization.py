@@ -16,6 +16,12 @@ import difflib
 
 def fmt_number(n: Union[int, float]) -> str:
     """Format large numbers with K/M/B suffixes."""
+    try:
+        n = float(n)
+    except (TypeError, ValueError):
+        return str(n)
+    if n < 0:
+        return f"-{fmt_number(-n)}"
     if n >= 1e9:
         return f"{n/1e9:.1f}B"
     if n >= 1e6:

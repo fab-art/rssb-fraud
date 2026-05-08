@@ -58,45 +58,91 @@ plt.rcParams.update({
 # ── CSS ───────────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Mono&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Mono:wght@400;500&display=swap');
 
+/* ── Base ─────────────────────────────────────────────────────────────────── */
 .stApp { background: #080c10; }
-section[data-testid="stSidebar"] { background: #0d1117 !important; border-right: 1px solid #1e2a38; }
+section[data-testid="stSidebar"] {
+    background: #0d1117 !important;
+    border-right: 1px solid #1e2a38;
+}
 
+/* Custom scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: #0d1117; }
+::-webkit-scrollbar-thumb { background: #1e2a38; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #2d3f54; }
+
+/* ── Metric cards ─────────────────────────────────────────────────────────── */
 [data-testid="stMetric"] {
     background: #111720; border: 1px solid #1e2a38;
     border-radius: 12px; padding: 16px 20px !important;
+    transition: border-color .2s, box-shadow .2s;
 }
-[data-testid="stMetricLabel"] { color: #64748b !important; font-size: 11px !important; text-transform: uppercase; letter-spacing: .5px; }
-[data-testid="stMetricValue"] { color: #e2e8f0 !important; font-size: 26px !important; font-weight: 800 !important; font-family: 'Syne', sans-serif !important; }
+[data-testid="stMetric"]:hover {
+    border-color: #2d3f54;
+    box-shadow: 0 4px 20px rgba(0,0,0,.3);
+}
+[data-testid="stMetricLabel"] {
+    color: #64748b !important; font-size: 11px !important;
+    text-transform: uppercase; letter-spacing: .5px;
+}
+[data-testid="stMetricValue"] {
+    color: #e2e8f0 !important; font-size: 26px !important;
+    font-weight: 800 !important; font-family: 'Syne', sans-serif !important;
+}
+[data-testid="stMetricDelta"] { font-size: 11px !important; font-family: 'DM Mono', monospace !important; }
 
-.stTabs [data-baseweb="tab-list"] { background: #0d1117; border-bottom: 1px solid #1e2a38; gap: 4px; }
-.stTabs [data-baseweb="tab"] { background: transparent; color: #64748b; font-weight: 600; border-radius: 0; border-bottom: 2px solid transparent; padding: 10px 18px; }
-.stTabs [aria-selected="true"] { color: #00e5a0 !important; border-bottom: 2px solid #00e5a0 !important; background: transparent !important; }
+/* ── Tabs ─────────────────────────────────────────────────────────────────── */
+.stTabs [data-baseweb="tab-list"] {
+    background: #0d1117; border-bottom: 1px solid #1e2a38;
+    gap: 2px; padding: 0 4px;
+}
+.stTabs [data-baseweb="tab"] {
+    background: transparent; color: #64748b; font-weight: 600;
+    border-radius: 0; border-bottom: 2px solid transparent;
+    padding: 10px 16px; transition: color .15s;
+    font-size: 13px;
+}
+.stTabs [data-baseweb="tab"]:hover { color: #94a3b8; }
+.stTabs [aria-selected="true"] {
+    color: #00e5a0 !important;
+    border-bottom: 2px solid #00e5a0 !important;
+    background: transparent !important;
+}
 
+/* ── Typography ───────────────────────────────────────────────────────────── */
 h1, h2, h3 { font-family: 'Syne', sans-serif !important; }
 
+/* ── Sidebar text ─────────────────────────────────────────────────────────── */
 .sidebar-title { font-family: 'Syne', sans-serif; font-size: 22px; font-weight: 800; color: #e2e8f0; margin-bottom: 4px; }
 .sidebar-sub   { font-size: 12px; color: #64748b; margin-bottom: 20px; }
 
+/* ── Chips / tags ─────────────────────────────────────────────────────────── */
 .chip-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .chip {
     background: rgba(14,165,233,.08); border: 1px solid rgba(14,165,233,.2);
     border-radius: 6px; padding: 3px 10px; font-size: 11px;
     font-family: 'DM Mono', monospace; color: #0ea5e9;
+    transition: background .15s, border-color .15s;
 }
+.chip:hover { background: rgba(14,165,233,.16); border-color: rgba(14,165,233,.4); }
+
+/* ── Info banner ──────────────────────────────────────────────────────────── */
 .info-banner {
     background: rgba(14,165,233,.06); border: 1px solid rgba(14,165,233,.2);
     border-radius: 10px; padding: 14px 18px; margin-bottom: 16px;
 }
 .info-banner b { color: #0ea5e9; }
 
+/* ── Section heading ──────────────────────────────────────────────────────── */
 .sec-head {
     font-family: 'Syne', sans-serif; font-size: 15px; font-weight: 700;
     color: #e2e8f0; padding-left: 10px; border-left: 3px solid #00e5a0;
     margin: 20px 0 12px;
 }
 
+/* ── Rapid-revisit cards ──────────────────────────────────────────────────── */
 .rapid-card {
     background: #111720; border: 1px solid #1e2a38;
     border-left: 3px solid #f59e0b; border-radius: 10px; padding: 12px 14px;
@@ -109,6 +155,45 @@ h1, h2, h3 { font-family: 'Syne', sans-serif !important; }
 .rapid-card.crit .rc-days { color: #ef4444; }
 .rc-days small { font-size: 11px; font-weight: 400; }
 .rc-meta { font-size: 11px; color: #64748b; font-family: 'DM Mono', monospace; margin-top: 5px; }
+
+/* ── Streamlit alert boxes — dark theme overrides ─────────────────────────── */
+[data-testid="stAlert"] { border-radius: 10px !important; }
+div[data-baseweb="notification"] { border-radius: 10px !important; }
+
+/* ── Input / select fields ────────────────────────────────────────────────── */
+[data-testid="stTextInput"] input,
+[data-testid="stNumberInput"] input {
+    background: #111720 !important; border-color: #1e2a38 !important;
+    color: #e2e8f0 !important; border-radius: 8px !important;
+}
+[data-testid="stTextInput"] input:focus,
+[data-testid="stNumberInput"] input:focus {
+    border-color: #00e5a0 !important;
+    box-shadow: 0 0 0 1px #00e5a0 !important;
+}
+
+/* ── Buttons ──────────────────────────────────────────────────────────────── */
+[data-testid="stDownloadButton"] button,
+button[kind="secondary"] {
+    border-radius: 8px !important;
+    font-family: 'DM Mono', monospace !important;
+    font-size: 12px !important;
+    transition: border-color .15s, color .15s !important;
+}
+
+/* ── Expander ─────────────────────────────────────────────────────────────── */
+[data-testid="stExpander"] {
+    border: 1px solid #1e2a38 !important;
+    border-radius: 10px !important;
+    background: #0d1117 !important;
+}
+[data-testid="stExpander"] summary { color: #94a3b8 !important; }
+
+/* ── Caption / small text ─────────────────────────────────────────────────── */
+[data-testid="stCaptionContainer"] { color: #475569 !important; font-family: 'DM Mono', monospace !important; font-size: 11px !important; }
+
+/* ── Radio buttons ────────────────────────────────────────────────────────── */
+[data-testid="stRadio"] label { font-size: 13px !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -182,12 +267,13 @@ def load_and_process(file_bytes: bytes, filename: str, rapid_days: int):
             renamed[col] = key
     df = df.rename(columns=renamed)
 
-    # Parse dates
+    # Parse dates (handles both NumPy object and PyArrow string dtypes)
     if "visit_date" in df.columns:
         df["visit_date"] = pd.to_datetime(df["visit_date"], errors="coerce")
     else:
         for col in df.columns:
-            if df[col].dtype == object:
+            _dstr = str(df[col].dtype)
+            if _dstr == "object" or "string" in _dstr or "large_string" in _dstr:
                 try:
                     parsed = pd.to_datetime(df[col], errors="coerce")
                     if parsed.notna().sum() > len(df) * 0.5:
@@ -237,12 +323,15 @@ def load_and_process(file_bytes: bytes, filename: str, rapid_days: int):
         if "visit_date" in rdf.columns:
             rdf = rdf.sort_values([id_col, "visit_date"])
         repeat_detail = rdf.head(500)
-        for pid in repeat_ids[:300]:
-            grp = df[df[id_col] == pid]
+        # Use groupby instead of per-patient DataFrame scans (O(n) vs O(n×m))
+        has_name = "patient_name" in rdf.columns and id_col != "patient_name"
+        has_date = "visit_date" in rdf.columns
+        top_rdf  = rdf[rdf[id_col].isin(repeat_ids[:300])]
+        for pid, grp in top_rdf.groupby(id_col, sort=False):
             entry = {id_col: str(pid), "visits": int(len(grp))}
-            if "patient_name" in grp.columns and id_col != "patient_name":
+            if has_name:
                 entry["patient_name"] = str(grp["patient_name"].iloc[0])
-            if "visit_date" in grp.columns:
+            if has_date:
                 dates = grp["visit_date"].dropna().sort_values()
                 entry["dates"] = ", ".join(str(d.date()) for d in dates if pd.notna(d))
             repeat_groups.append(entry)
@@ -295,17 +384,20 @@ def load_and_process(file_bytes: bytes, filename: str, rapid_days: int):
 # ── Chart helpers ─────────────────────────────────────────────────────────────
 
 def hbar_chart(labels, values, color, title, xlabel):
+    if not values:
+        return None
+    max_val = max(values) or 1
     fig, ax = plt.subplots(figsize=(7, max(2.5, len(labels) * 0.42)))
     bars = ax.barh(labels[::-1], values[::-1],
                    color=color if isinstance(color, list) else [color] * len(labels),
                    height=0.65)
     for bar, val in zip(bars, values[::-1]):
-        ax.text(bar.get_width() + max(values) * 0.01,
+        ax.text(bar.get_width() + max_val * 0.01,
                 bar.get_y() + bar.get_height() / 2,
                 str(val), va="center", color=TEXT, fontsize=8)
     ax.set_xlabel(xlabel)
     ax.set_title(title, fontsize=11, fontweight="bold", color=TEXT, pad=10)
-    ax.set_xlim(0, max(values) * 1.2)
+    ax.set_xlim(0, max_val * 1.2)
     ax.spines[["top", "right"]].set_visible(False)
     ax.grid(axis="x", alpha=0.3)
     fig.tight_layout()
@@ -799,6 +891,12 @@ function closeInfo() {{
 
 
 def fmt_number(n):
+    try:
+        n = float(n)
+    except (TypeError, ValueError):
+        return str(n)
+    if n < 0:
+        return f"-{fmt_number(-n)}"
     if n >= 1e9:  return f"{n/1e9:.1f}B"
     if n >= 1e6:  return f"{n/1e6:.1f}M"
     if n >= 1e3:  return f"{n/1e3:.1f}K"
@@ -1438,16 +1536,16 @@ def run_rules_engine(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
     summary["rules_available"] = sorted(set(summary["rules_available"]))
 
     # Pre-build refill index: {(patient_id, drug_code): [sorted dates]}
+    # Uses groupby — much faster than iterrows on large datasets.
     refill_index = {}
     if id_col and drug_col and date_col:
-        sub = df[[id_col, drug_col, date_col]].dropna()
-        for _, row in sub.iterrows():
-            key = (str(row[id_col]).strip(), str(row[drug_col]).strip())
-            dt  = pd.to_datetime(row[date_col], errors="coerce")
-            if pd.notna(dt):
-                refill_index.setdefault(key, []).append(dt)
-        for key in refill_index:
-            refill_index[key].sort()
+        sub = df[[id_col, drug_col, date_col]].copy()
+        sub[date_col] = pd.to_datetime(sub[date_col], errors="coerce")
+        sub = sub.dropna(subset=[id_col, drug_col, date_col])
+        sub[id_col]   = sub[id_col].astype(str).str.strip()
+        sub[drug_col] = sub[drug_col].astype(str).str.strip()
+        for (pid, dcode), grp in sub.groupby([id_col, drug_col], sort=False):
+            refill_index[(pid, dcode)] = sorted(grp[date_col].tolist())
 
     for idx, row in df.iterrows():
         score    = 0
@@ -2367,13 +2465,17 @@ with tab_summary:
             colors = [DANGER if v >= 10 else WARN if v >= 5 else ACCENT for v in td["visits"]]
             fig = hbar_chart([str(x)[:22] for x in td["id"]], td["visits"].tolist(),
                              colors, "Top Patients (RAMA No.) by Visit Count", "Visits")
-            st.pyplot(fig, use_container_width=True); plt.close(fig)
+            if fig:
+                st.pyplot(fig, use_container_width=True)
+                plt.close(fig)
     with right:
         if "top_doctors" in s:
             td = s["top_doctors"].head(top_n)
             fig = hbar_chart([str(x)[:22] for x in td["doctor"]], td["visits"].tolist(),
                              ACCENT2, "Top Practitioners by Visit Volume", "Visits")
-            st.pyplot(fig, use_container_width=True); plt.close(fig)
+            if fig:
+                st.pyplot(fig, use_container_width=True)
+                plt.close(fig)
 
     # Practitioner type breakdown
     if "doctor_type" in df.columns:
@@ -2383,7 +2485,9 @@ with tab_summary:
             dt_vc.values.tolist(),
             PURPLE, "Visits by Practitioner Type", "Visits",
         )
-        st.pyplot(fig, use_container_width=True); plt.close(fig)
+        if fig:
+            st.pyplot(fig, use_container_width=True)
+            plt.close(fig)
 
     # Gender & patient type pie charts
     gc1, gc2 = st.columns(2)
@@ -2542,7 +2646,7 @@ with tab_repeat:
                        f"≥5 visits: {sum(1 for g in repeat_groups if g['visits']>=5)} · "
                        f"≥10 visits: {sum(1 for g in repeat_groups if g['visits']>=10)}")
             st.dataframe(
-                _grp_df.style.applymap(_highlight_v, subset=["visits"]),
+                _grp_df.style.map(_highlight_v, subset=["visits"]),
                 use_container_width=True, height=360,
             )
 
@@ -2601,12 +2705,9 @@ with tab_repeat:
                         delta_color="inverse" if _critical else "normal")
             _avg_d = sum(r["days_apart"] for r in rapid) / len(rapid)
             _rv3.metric("Avg Days Apart",        f"{_avg_d:.1f}")
-            _same_doc = sum(
-                1 for r in rapid
-                if r.get("doctor","—") not in ("—","")
-                and len({r["doctor"]}) == 1
-            )
-            _rv4.metric("Rapid revisit window",  f"≤{rapid_days} days")
+            _unique_pts = len({r["patient_id"] for r in rapid})
+            _rv4.metric("Unique Patients",       _unique_pts,
+                        delta=f"≤{rapid_days}-day window")
 
             # Histogram
             _fig_rh = rapid_histogram(rapid)
@@ -2705,8 +2806,11 @@ with tab_network:
   else:
 
     # All text / categorical columns available for network nodes
-    cat_cols = [c for c in df.columns
-                if df[c].dtype == object or str(df[c].dtype).startswith("string")]
+    # Handles both NumPy object and PyArrow string/large_string dtypes.
+    def _is_cat(col):
+        d = str(df[col].dtype)
+        return d == "object" or "string" in d or "large_string" in d
+    cat_cols = [c for c in df.columns if _is_cat(c)]
     if not cat_cols:
         cat_cols = list(df.columns)
 
@@ -4108,7 +4212,7 @@ with tab_dataprep:
                 return ""
 
         st.dataframe(
-            _qual_df.style.applymap(_color_fill, subset=["Fill %"]),
+            _qual_df.style.map(_color_fill, subset=["Fill %"]),
             use_container_width=True, height=280,
         )
 

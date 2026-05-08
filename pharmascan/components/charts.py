@@ -62,6 +62,9 @@ def hbar_chart(labels: list, values: list, color, title: str, xlabel: str):
     Returns:
         Matplotlib figure object
     """
+    if not values:
+        return None
+    max_val = max(values) or 1
     fig, ax = plt.subplots(figsize=(7, max(2.5, len(labels) * 0.42)))
     bars = ax.barh(
         labels[::-1],
@@ -71,7 +74,7 @@ def hbar_chart(labels: list, values: list, color, title: str, xlabel: str):
     )
     for bar, val in zip(bars, values[::-1]):
         ax.text(
-            bar.get_width() + max(values) * 0.01,
+            bar.get_width() + max_val * 0.01,
             bar.get_y() + bar.get_height() / 2,
             str(val),
             va="center",
@@ -80,7 +83,7 @@ def hbar_chart(labels: list, values: list, color, title: str, xlabel: str):
         )
     ax.set_xlabel(xlabel)
     ax.set_title(title, fontsize=11, fontweight="bold", color=TEXT, pad=10)
-    ax.set_xlim(0, max(values) * 1.2)
+    ax.set_xlim(0, max_val * 1.2)
     ax.spines[["top", "right"]].set_visible(False)
     ax.grid(axis="x", alpha=0.3)
     fig.tight_layout()

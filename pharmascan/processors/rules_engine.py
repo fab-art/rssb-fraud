@@ -180,16 +180,16 @@ def run_rules_engine(
     summary["rules_available"] = sorted(set(summary["rules_available"]))
 
     # Pre-build refill index: {(patient_id, drug_code): [sorted dates]}
+    # Uses groupby instead of iterrows for a large speed-up on big datasets.
     refill_index = {}
     if id_col and drug_col and date_col:
-        sub = df[[id_col, drug_col, date_col]].dropna()
-        for _, row in sub.iterrows():
-            key = (str(row[id_col]).strip(), str(row[drug_col]).strip())
-            dt = pd.to_datetime(row[date_col], errors="coerce")
-            if pd.notna(dt):
-                refill_index.setdefault(key, []).append(dt)
-        for key in refill_index:
-            refill_index[key].sort()
+        sub = df[[id_col, drug_col, date_col]].copy()
+        sub[date_col] = pd.to_datetime(sub[date_col], errors="coerce")
+        sub = sub.dropna(subset=[id_col, drug_col, date_col])
+        sub[id_col] = sub[id_col].astype(str).str.strip()
+        sub[drug_col] = sub[drug_col].astype(str).str.strip()
+        for (pid, dcode), grp in sub.groupby([id_col, drug_col], sort=False):
+            refill_index[(pid, dcode)] = sorted(grp[date_col].tolist())
 
     for idx, row in df.iterrows():
         score = 0
