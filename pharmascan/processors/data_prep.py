@@ -308,11 +308,13 @@ def profile_column(df: pd.DataFrame, col: str) -> dict[str, Any]:
     # Sample values
     info["samples"] = [str(v) for v in non_null.head(5).tolist()]
 
+    _is_str = dtype_str == "object" or "string" in dtype_str or "large_string" in dtype_str
+
     # Detect date
     if "datetime" in dtype_str:
         info["is_date"] = True
         info["looks_like_date"] = True
-    elif dtype_str == "object" and len(non_null) > 0:
+    elif _is_str and len(non_null) > 0:
         try:
             test = pd.to_datetime(non_null.head(20), errors="coerce")
             if test.notna().mean() > 0.7:
@@ -334,8 +336,8 @@ def profile_column(df: pd.DataFrame, col: str) -> dict[str, Any]:
         if alpha_ratio > 0.8 and 4 <= avg_len <= 20:
             info["looks_like_id"] = True
 
-    # Looks like drug code (ATC pattern)
-    if dtype_str == "object" and len(non_null) > 0:
+    # Looks like drug code (ATC pattern) — covers both object and PyArrow string dtypes
+    if _is_str and len(non_null) > 0:
         sample_str = non_null.head(20).astype(str)
         atc_match = sample_str.str.match(r"^[A-Z][0-9]{2}[A-Z]{2}").mean()
         if atc_match > 0.5:

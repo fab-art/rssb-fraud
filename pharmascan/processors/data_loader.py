@@ -77,15 +77,22 @@ def normalize_column_names(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
     return df.rename(columns=renamed), renamed
 
 
+def _is_string_col(series: pd.Series) -> bool:
+    """Return True for object, string, and PyArrow string columns."""
+    dtype_str = str(series.dtype)
+    return dtype_str == "object" or "string" in dtype_str or "large_string" in dtype_str
+
+
 def parse_dates(df: pd.DataFrame) -> pd.DataFrame:
     """
     Parse date columns in the DataFrame.
-    
+
     First tries 'visit_date' column, then searches for date-like columns.
-    
+    Handles both NumPy object and PyArrow string dtypes.
+
     Args:
         df: Input DataFrame
-        
+
     Returns:
         DataFrame with parsed dates
     """
@@ -94,7 +101,7 @@ def parse_dates(df: pd.DataFrame) -> pd.DataFrame:
         df["visit_date"] = pd.to_datetime(df["visit_date"], errors="coerce")
     else:
         for col in df.columns:
-            if df[col].dtype == object:
+            if _is_string_col(df[col]):
                 try:
                     parsed = pd.to_datetime(df[col], errors="coerce")
                     if parsed.notna().sum() > len(df) * 0.5:
@@ -156,13 +163,13 @@ def calculate_summary_stats(df: pd.DataFrame) -> dict:
         s["unique_facilities"] = int(df["facility"].nunique())
         s["top_facilities"] = fvc.head(10).rename_axis("name").reset_index(name="visits")
     
-    # Amount statistics
+    # Amount statistics (work on local numeric views — never mutate the input df)
     for amt_col in ["amount", "medicine_cost", "insurance_copay", "patient_copay"]:
         if amt_col in df.columns:
-            df[amt_col] = pd.to_numeric(df[amt_col], errors="coerce")
-    if "amount" in df.columns:
-        s["total_amount"] = round(float(df["amount"].sum()), 2)
-        s["avg_amount"] = round(float(df["amount"].mean()), 2)
+            numeric_vals = pd.to_numeric(df[amt_col], errors="coerce")
+            if amt_col == "amount":
+                s["total_amount"] = round(float(numeric_vals.sum()), 2)
+                s["avg_amount"] = round(float(numeric_vals.mean()), 2)
     
     return s
 
@@ -191,22 +198,26 @@ def detect_repeat_visits(df: pd.DataFrame, id_col: Optional[str] = None) -> tupl
     vc2 = df[id_col].value_counts()
     repeat_ids = vc2[vc2 > 1].index.tolist()
     rdf = df[df[id_col].isin(repeat_ids)].copy()
-    
+
     if "visit_date" in rdf.columns:
         rdf = rdf.sort_values([id_col, "visit_date"])
     repeat_detail = rdf.head(500)
-    
+
+    # Build repeat_groups using groupby instead of per-patient DataFrame scans
     repeat_groups = []
-    for pid in repeat_ids[:300]:
-        grp = df[df[id_col] == pid]
+    has_name = "patient_name" in rdf.columns and id_col != "patient_name"
+    has_date = "visit_date" in rdf.columns
+    top_rdf = rdf[rdf[id_col].isin(repeat_ids[:300])]
+
+    for pid, grp in top_rdf.groupby(id_col, sort=False):
         entry = {id_col: str(pid), "visits": int(len(grp))}
-        if "patient_name" in grp.columns and id_col != "patient_name":
+        if has_name:
             entry["patient_name"] = str(grp["patient_name"].iloc[0])
-        if "visit_date" in grp.columns:
+        if has_date:
             dates = grp["visit_date"].dropna().sort_values()
             entry["dates"] = ", ".join(str(d.date()) for d in dates if pd.notna(d))
         repeat_groups.append(entry)
-    
+
     repeat_groups.sort(key=lambda x: x["visits"], reverse=True)
     return repeat_groups, repeat_detail
 
