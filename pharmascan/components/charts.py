@@ -283,3 +283,344 @@ def build_network_data(
         "col_b_lbl": col_b_lbl,
     }
     return vis_nodes, vis_edges, stats
+
+
+def render_vis_network(vis_nodes, vis_edges, stats, physics_mode: str, height: int = 680):
+    """Render an interactive vis.js network via st.components.v1.html()."""
+    import json
+    import streamlit.components.v1 as components
+
+    nodes_json = json.dumps(vis_nodes)
+    edges_json = json.dumps(vis_edges)
+    col_a_lbl  = stats.get("col_a_lbl", "Node A")
+    col_b_lbl  = stats.get("col_b_lbl", "Node B")
+    n_a = stats.get("nodes_a", 0)
+    n_b = stats.get("nodes_b", 0)
+
+    physics_opts = {
+        "Force Atlas 2": json.dumps({
+            "solver": "forceAtlas2Based",
+            "forceAtlas2Based": {"gravitationalConstant": -60, "centralGravity": 0.01,
+                                  "springLength": 120, "springConstant": 0.08, "damping": 0.4},
+            "stabilization": {"iterations": 150},
+        }),
+        "Barnes-Hut": json.dumps({
+            "solver": "barnesHut",
+            "barnesHut": {"gravitationalConstant": -8000, "centralGravity": 0.3,
+                           "springLength": 140, "springConstant": 0.04, "damping": 0.09},
+            "stabilization": {"iterations": 150},
+        }),
+        "Repulsion": json.dumps({
+            "solver": "repulsion",
+            "repulsion": {"centralGravity": 0.2, "springLength": 200,
+                           "springConstant": 0.05, "nodeDistance": 150, "damping": 0.09},
+            "stabilization": {"iterations": 150},
+        }),
+        "None (static)": json.dumps({"enabled": False}),
+    }
+    physics_json = physics_opts.get(physics_mode, physics_opts["Force Atlas 2"])
+
+    html = f"""
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/vis/4.21.0/vis.min.js"></script>
+<link  href="https://cdnjs.cloudflare.com/ajax/libs/vis/4.21.0/vis.min.css" rel="stylesheet">
+<style>
+  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  body {{ background: #080c10; font-family: 'DM Mono', monospace; color: #e2e8f0; overflow: hidden; }}
+
+  #net-wrap {{ position: relative; width: 100%; height: {height}px; background: #0d1117;
+               border: 1px solid #1e2a38; border-radius: 12px; overflow: hidden; }}
+  #network  {{ width: 100%; height: 100%; }}
+
+  /* Toolbar */
+  #toolbar {{
+    position: absolute; top: 12px; left: 12px; z-index: 10;
+    display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
+  }}
+  .tb-btn {{
+    background: rgba(17,23,32,.92); border: 1px solid #1e2a38;
+    color: #e2e8f0; border-radius: 7px; padding: 6px 12px;
+    font-size: 11px; font-family: monospace; cursor: pointer;
+    transition: all .15s; backdrop-filter: blur(4px);
+  }}
+  .tb-btn:hover {{ border-color: #00e5a0; color: #00e5a0; }}
+  .tb-btn.active {{ background: rgba(0,229,160,.12); border-color: #00e5a0; color: #00e5a0; }}
+  .tb-sep {{ width: 1px; height: 22px; background: #1e2a38; }}
+
+  /* Search box */
+  #search-wrap {{ position: absolute; top: 12px; right: 12px; z-index: 10; display: flex; gap: 6px; }}
+  #node-search {{
+    background: rgba(17,23,32,.92); border: 1px solid #1e2a38;
+    color: #e2e8f0; border-radius: 7px; padding: 6px 12px;
+    font-size: 11px; font-family: monospace; width: 180px; outline: none;
+    backdrop-filter: blur(4px);
+  }}
+  #node-search:focus {{ border-color: #00e5a0; }}
+  #node-search::placeholder {{ color: #64748b; }}
+
+  /* Legend */
+  #legend {{
+    position: absolute; bottom: 14px; left: 14px; z-index: 10;
+    background: rgba(13,17,23,.88); border: 1px solid #1e2a38;
+    border-radius: 10px; padding: 10px 14px; backdrop-filter: blur(4px);
+    font-size: 11px;
+  }}
+  .leg-row {{ display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }}
+  .leg-row:last-child {{ margin-bottom: 0; }}
+  .leg-dot {{ width: 11px; height: 11px; border-radius: 50%; flex-shrink: 0; }}
+  .leg-dia {{ width: 10px; height: 10px; transform: rotate(45deg); flex-shrink: 0; border-radius: 1px; }}
+
+  /* Stats bar */
+  #stats-bar {{
+    position: absolute; bottom: 14px; right: 14px; z-index: 10;
+    background: rgba(13,17,23,.88); border: 1px solid #1e2a38;
+    border-radius: 10px; padding: 10px 14px; backdrop-filter: blur(4px);
+    font-size: 11px; color: #64748b; line-height: 1.7;
+  }}
+  #stats-bar b {{ color: #e2e8f0; }}
+
+  /* Tooltip override */
+  .vis-tooltip {{
+    background: #111720 !important; border: 1px solid #1e2a38 !important;
+    color: #e2e8f0 !important; border-radius: 8px !important;
+    font-family: 'DM Mono', monospace !important; font-size: 12px !important;
+    padding: 8px 12px !important; box-shadow: 0 4px 20px rgba(0,0,0,.4) !important;
+  }}
+
+  /* Selected info panel */
+  #info-panel {{
+    display: none; position: absolute; top: 56px; right: 12px; z-index: 10;
+    background: rgba(13,17,23,.95); border: 1px solid #1e2a38;
+    border-radius: 10px; padding: 14px 16px; font-size: 12px;
+    min-width: 200px; max-width: 260px; backdrop-filter: blur(4px);
+  }}
+  #info-panel .ip-name {{ font-size: 14px; font-weight: 700; color: #e2e8f0; margin-bottom: 6px; word-break: break-all; }}
+  #info-panel .ip-row  {{ display: flex; justify-content: space-between; margin-bottom: 3px; }}
+  #info-panel .ip-lbl  {{ color: #64748b; }}
+  #info-panel .ip-val  {{ color: #e2e8f0; font-weight: 600; }}
+  #info-panel .ip-close {{ float: right; cursor: pointer; color: #64748b; font-size: 14px; margin-left: 8px; }}
+  #info-panel .ip-close:hover {{ color: #ef4444; }}
+  #info-panel .ip-nbrs {{ margin-top: 8px; border-top: 1px solid #1e2a38; padding-top: 8px; }}
+  #info-panel .ip-nbr  {{ color: #64748b; font-size: 11px; margin-bottom: 2px; }}
+
+  #stabilizing {{ position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+    background: rgba(13,17,23,.9); border: 1px solid #1e2a38; border-radius: 10px;
+    padding: 16px 24px; font-size: 13px; color: #00e5a0; z-index: 20;
+    display: flex; align-items: center; gap: 10px; }}
+  .spin {{ width: 16px; height: 16px; border: 2px solid rgba(0,229,160,.2);
+    border-top-color: #00e5a0; border-radius: 50%; animation: spin .7s linear infinite; }}
+  @keyframes spin {{ to {{ transform: rotate(360deg); }} }}
+</style>
+</head>
+<body>
+
+<div id="net-wrap">
+  <div id="stabilizing"><div class="spin"></div> Laying out graph…</div>
+
+  <div id="toolbar">
+    <button class="tb-btn" onclick="zoomIn()">＋</button>
+    <button class="tb-btn" onclick="zoomOut()">－</button>
+    <button class="tb-btn" onclick="fitAll()">⊡ Fit</button>
+    <div class="tb-sep"></div>
+    <button class="tb-btn" id="btn-physics" onclick="togglePhysics()">⏸ Freeze</button>
+    <button class="tb-btn" onclick="highlightHubs()">★ Hubs</button>
+    <button class="tb-btn" onclick="resetHighlight()">↺ Reset</button>
+    <div class="tb-sep"></div>
+    <button class="tb-btn" id="btn-labels" onclick="toggleLabels()">🏷 Labels</button>
+  </div>
+
+  <div id="search-wrap">
+    <input id="node-search" placeholder="🔍 Search node…" oninput="searchNode(this.value)">
+  </div>
+
+  <div id="network"></div>
+
+  <div id="info-panel">
+    <div><span class="ip-close" onclick="closeInfo()">✕</span><div class="ip-name" id="ip-name"></div></div>
+    <div class="ip-row"><span class="ip-lbl">Type</span><span class="ip-val" id="ip-type"></span></div>
+    <div class="ip-row"><span class="ip-lbl">Connections</span><span class="ip-val" id="ip-deg"></span></div>
+    <div class="ip-nbrs"><div style="color:#64748b;font-size:10px;margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px">Connected to</div>
+      <div id="ip-nbr-list"></div>
+    </div>
+  </div>
+
+  <div id="legend">
+    <div class="leg-row"><div class="leg-dia" style="background:#00e5a0"></div><span>{col_a_lbl} ({n_a})</span></div>
+    <div class="leg-row"><div class="leg-dot" style="background:#0ea5e9"></div><span>{col_b_lbl} ({n_b})</span></div>
+  </div>
+
+  <div id="stats-bar">
+    <div><b>{stats["nodes_a"] + stats["nodes_b"]}</b> nodes</div>
+    <div><b>{stats["edges"]}</b> edges</div>
+    <div>avg degree <b>{stats["avg_degree"]}</b></div>
+    <div>density <b>{stats["density"]}</b></div>
+  </div>
+</div>
+
+<script>
+const nodesData = {nodes_json};
+const edgesData = {edges_json};
+
+// Build lookup maps
+const nodeMap = {{}};
+nodesData.forEach(n => nodeMap[n.id] = n);
+
+const adjMap = {{}};
+edgesData.forEach(e => {{
+  if (!adjMap[e.from]) adjMap[e.from] = [];
+  if (!adjMap[e.to])   adjMap[e.to]   = [];
+  adjMap[e.from].push({{id: e.to,   w: e.weight}});
+  adjMap[e.to].push(  {{id: e.from, w: e.weight}});
+}});
+
+const nodes = new vis.DataSet(nodesData);
+const edges = new vis.DataSet(edgesData);
+
+const container = document.getElementById('network');
+const physicsConfig = {physics_json};
+
+const options = {{
+  nodes: {{ borderWidth: 1.5, shadow: {{ enabled: true, color: 'rgba(0,0,0,.5)', x: 2, y: 2, size: 8 }} }},
+  edges: {{ smooth: {{ type: 'dynamic' }}, shadow: false, selectionWidth: 3 }},
+  physics: physicsConfig,
+  interaction: {{
+    hover: true, tooltipDelay: 150,
+    navigationButtons: false,
+    keyboard: true,
+    multiselect: true,
+    zoomView: true,
+  }},
+  layout: {{ improvedLayout: true }},
+}};
+
+const network = new vis.Network(container, {{ nodes, edges }}, options);
+
+// Hide spinner once stabilised
+network.on('stabilizationIterationsDone', () => {{
+  document.getElementById('stabilizing').style.display = 'none';
+  network.setOptions({{ physics: {{ enabled: false }} }});
+  document.getElementById('btn-physics').textContent = '▶ Unfreeze';
+  physicsRunning = false;
+}});
+network.on('stabilized', () => {{
+  document.getElementById('stabilizing').style.display = 'none';
+}});
+
+// State
+let physicsRunning = true;
+let labelsVisible  = true;
+let hubsHighlighted = false;
+
+// ── Controls ──
+function zoomIn()  {{ network.moveTo({{ scale: network.getScale() * 1.3, animation: true }}); }}
+function zoomOut() {{ network.moveTo({{ scale: network.getScale() * 0.77, animation: true }}); }}
+function fitAll()  {{ network.fit({{ animation: {{ duration: 600, easingFunction: 'easeInOutQuad' }} }}); }}
+
+function togglePhysics() {{
+  physicsRunning = !physicsRunning;
+  network.setOptions({{ physics: {{ enabled: physicsRunning }} }});
+  document.getElementById('btn-physics').textContent = physicsRunning ? '⏸ Freeze' : '▶ Unfreeze';
+  document.getElementById('btn-physics').classList.toggle('active', physicsRunning);
+}}
+
+function toggleLabels() {{
+  labelsVisible = !labelsVisible;
+  const update = nodesData.map(n => ({{
+    id: n.id,
+    font: {{ ...n.font, color: labelsVisible ? '#e2e8f0' : 'rgba(0,0,0,0)' }}
+  }}));
+  nodes.update(update);
+  document.getElementById('btn-labels').classList.toggle('active', labelsVisible);
+}}
+
+function highlightHubs() {{
+  hubsHighlighted = !hubsHighlighted;
+  if (hubsHighlighted) {{
+    const maxDeg = Math.max(...nodesData.map(n => n.degree));
+    const thresh = maxDeg * 0.5;
+    const update = nodesData.map(n => ({{
+      id: n.id,
+      opacity: n.degree >= thresh ? 1.0 : 0.15,
+    }}));
+    nodes.update(update);
+  }} else {{
+    resetHighlight();
+  }}
+}}
+
+function resetHighlight() {{
+  hubsHighlighted = false;
+  nodes.update(nodesData.map(n => ({{ id: n.id, opacity: 1.0 }})));
+  document.getElementById('node-search').value = '';
+}}
+
+function searchNode(q) {{
+  q = q.trim().toLowerCase();
+  if (!q) {{ resetHighlight(); return; }}
+  const update = nodesData.map(n => ({{
+    id: n.id,
+    opacity: n.id.toLowerCase().includes(q) ? 1.0 : 0.1,
+  }}));
+  nodes.update(update);
+  // Focus first match
+  const match = nodesData.find(n => n.id.toLowerCase().includes(q));
+  if (match) {{
+    network.focus(match.id, {{ scale: 1.4, animation: {{ duration: 600, easingFunction: 'easeInOutQuad' }} }});
+  }}
+}}
+
+// ── Click → info panel ──
+network.on('click', params => {{
+  if (params.nodes.length === 1) {{
+    const nid = params.nodes[0];
+    const nd  = nodeMap[nid];
+    if (!nd) return;
+    document.getElementById('ip-name').textContent = nid;
+    document.getElementById('ip-type').textContent = nd.group === 'A' ? '{col_a_lbl}' : '{col_b_lbl}';
+    document.getElementById('ip-deg').textContent  = nd.degree;
+    const nbrs = (adjMap[nid] || []).sort((a,b) => b.w - a.w).slice(0, 10);
+    document.getElementById('ip-nbr-list').innerHTML =
+      nbrs.map(n => `<div class="ip-nbr">• ${{n.id.length > 24 ? n.id.slice(0,24)+'…' : n.id}} <span style="color:#00e5a0">×${{n.w}}</span></div>`).join('');
+    document.getElementById('info-panel').style.display = 'block';
+
+    // Dim non-neighbours
+    const connectedIds = new Set([nid, ...nbrs.map(n => n.id)]);
+    nodes.update(nodesData.map(n => ({{ id: n.id, opacity: connectedIds.has(n.id) ? 1.0 : 0.1 }})));
+    edges.update(edgesData.map(e => ({{
+      id: e.id,
+      color: {{
+        color: (e.from === nid || e.to === nid) ? '#00e5a0' : 'rgba(100,116,139,0.06)',
+        highlight: '#00e5a0', hover: '#f59e0b',
+      }},
+    }})));
+  }} else {{
+    closeInfo();
+    resetHighlight();
+  }}
+}});
+
+// ── Double-click → zoom to node ──
+network.on('doubleClick', params => {{
+  if (params.nodes.length === 1) {{
+    network.focus(params.nodes[0], {{ scale: 2.0, animation: {{ duration: 500, easingFunction: 'easeInOutQuad' }} }});
+  }}
+}});
+
+// ── Hover ──
+network.on('hoverNode', params => {{
+  container.style.cursor = 'pointer';
+}});
+network.on('blurNode',  () => {{ container.style.cursor = 'default'; }});
+
+function closeInfo() {{
+  document.getElementById('info-panel').style.display = 'none';
+  resetHighlight();
+}}
+</script>
+</body>
+</html>"""
+
+    components.html(html, height=height + 10, scrolling=False)
