@@ -2,6 +2,8 @@
 Configuration constants for PharmaScan application.
 """
 
+import re
+
 # ── Colours ───────────────────────────────────────────────────────────────────
 ACCENT = "#00e5a0"
 ACCENT2 = "#0ea5e9"
@@ -14,6 +16,16 @@ DARK = "#0d1117"
 BG = DARK  # alias for matplotlib axes
 CARD = "#111720"
 BORDER = "#1e2a38"
+
+# ── Matplotlib rcParams ───────────────────────────────────────────────────────
+PLT_RCPARAMS = {
+    "figure.facecolor": CARD,  "axes.facecolor":  DARK,
+    "axes.edgecolor":   BORDER,"axes.labelcolor": MUTED,
+    "axes.titlecolor":  TEXT,  "xtick.color":     MUTED,
+    "ytick.color":      MUTED, "text.color":      TEXT,
+    "grid.color":       BORDER,"grid.linewidth":  0.5,
+    "font.family":      "monospace", "font.size": 9,
+}
 
 # ── Column normalisation mapping ──────────────────────────────────────────────
 COLUMN_MAP = {
@@ -50,6 +62,9 @@ COLUMN_MAP = {
     r"(diagnosis|diag|icd|condition)": "diagnosis",
     r"(voucher|claim|ref|reference).?(no|number|id|code)?": "voucher_id",
 }
+
+# ── Pre-compiled column patterns ─────────────────────────────────────────────
+_COLUMN_PATTERNS = [(re.compile(pattern), target) for pattern, target in COLUMN_MAP.items()]
 
 # ── Default settings ──────────────────────────────────────────────────────────
 DEFAULT_RAPID_DAYS = 7
