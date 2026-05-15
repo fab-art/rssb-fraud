@@ -3506,7 +3506,7 @@ with tab_xfac:
     # ── Core matching ─────────────────────────────────────────────────────────
     # For each pharmacy row, find best facility match by RAMA + name + date
     results = []
-    for _, pr in ph_work.iterrows():
+    for ph_idx, (_, pr) in enumerate(ph_work.iterrows()):
         rama     = pr["_rama"]
         ph_date  = pr["_date"]
         ph_name  = pr["_name"]
@@ -3516,6 +3516,7 @@ with tab_xfac:
         if fac_rows.empty:
             # NO facility record for this RAMA at all
             results.append({
+                "_ph_idx": ph_idx,
                 "status": "NO_RECORD",
                 "ph_voucher": pr["_vou"],
                 "ph_patient": ph_name,
@@ -3545,6 +3546,7 @@ with tab_xfac:
         if best is not None:
             # MATCHED — legitimate dispensing with traced visit
             results.append({
+                "_ph_idx":     ph_idx,
                 "status":      "MATCHED",
                 "ph_voucher":  pr["_vou"],   "ph_patient": ph_name,
                 "ph_rama":     rama,          "ph_date":    ph_date,
@@ -3563,6 +3565,7 @@ with tab_xfac:
                 nearest_d = int(deltas.min().days)
             best_fr = fac_rows.iloc[0]
             results.append({
+                "_ph_idx":     ph_idx,
                 "status":      "UNLINKED",
                 "ph_voucher":  pr["_vou"],   "ph_patient": ph_name,
                 "ph_rama":     rama,          "ph_date":    ph_date,
@@ -3573,16 +3576,19 @@ with tab_xfac:
                 "days_apart":  nearest_d,     "name_score": round(_tok(ph_name, best_fr["_name"]),2),
             })
 
-    res_df = pd.DataFrame(results)
+    _match_cols = ["_ph_idx", "status", "fac_voucher", "fac_name",
+                   "fac_date", "fac_source", "days_apart", "name_score"]
+    _res_match  = pd.DataFrame(results)[_match_cols].set_index("_ph_idx")
+    res_df = ph_work.reset_index(drop=True).join(_res_match, how="left")
 
     no_rec    = res_df[res_df["status"]=="NO_RECORD"]
     unlinked  = res_df[res_df["status"]=="UNLINKED"]
     matched   = res_df[res_df["status"]=="MATCHED"]
 
-    total_ins       = res_df["ph_ins"].sum()
-    no_rec_ins      = no_rec["ph_ins"].sum()
-    unlinked_ins    = unlinked["ph_ins"].sum()
-    matched_ins     = matched["ph_ins"].sum()
+    total_ins       = res_df["_ins"].sum()
+    no_rec_ins      = no_rec["_ins"].sum()
+    unlinked_ins    = unlinked["_ins"].sum()
+    matched_ins     = matched["_ins"].sum()
     at_risk_ins     = no_rec_ins + unlinked_ins
     fac_count       = fac_df["_source"].nunique()
     coverage_pct    = 100 * matched_ins / total_ins if total_ins else 0
@@ -3653,219 +3659,122 @@ with tab_xfac:
 
     st.markdown("<hr style='border-color:#1e2a38;margin:4px 0 24px'>", unsafe_allow_html=True)
 
-    # ── TABLE 1: No Hospital Record ───────────────────────────────────────────
+    # ── Build unified sorted findings frame ───────────────────────────────────
+    _priority = {"NO_RECORD": 0, "UNLINKED": 1, "MATCHED": 2}
+    unified_df = res_df.copy()
+    unified_df["_sort_priority"] = unified_df["status"].map(_priority)
+    unified_df = (unified_df
+        .sort_values(["_sort_priority", "_ins"], ascending=[True, False])
+        .drop(columns=["_sort_priority"])
+        .reset_index(drop=True)
+    )
+
+    # ── ALL FINDINGS (unified table) ──────────────────────────────────────────
     st.markdown(f"""
-<div class='fraud-card fraud-card-red'>
+<div class='fraud-card' style='border-color:#334155;background:#0d1724'>
   <div style='display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px'>
     <div>
-      <span style='font-size:16px;font-weight:800;color:#f87171;font-family:Syne,sans-serif'>
-        🔴 Table 1 — No Hospital / Clinic Visit Record
+      <span style='font-size:16px;font-weight:800;color:#e2e8f0;font-family:Syne,sans-serif'>
+        📋 All Findings — Cross-Facility Match Results
       </span>
-      <span class='badge badge-red' style='margin-left:10px'>{len(no_rec):,} vouchers</span>
-      <span class='badge badge-red' style='margin-left:6px'>RWF {no_rec_ins:,.0f}</span>
+      <span class='badge badge-red'   style='margin-left:10px'>🔴 {len(no_rec):,} No Record</span>
+      <span class='badge badge-amber' style='margin-left:6px' >🟡 {len(unlinked):,} Unlinked</span>
+      <span class='badge badge-green' style='margin-left:6px' >✅ {len(matched):,} Verified</span>
     </div>
-    <span style='font-size:11px;color:#991b1b;font-family:monospace'>
-      Patient's RAMA number not found in ANY uploaded facility file
+    <span style='font-size:11px;color:#64748b;font-family:monospace'>
+      Sorted by risk priority · insurance descending within each group
     </span>
   </div>
 </div>""", unsafe_allow_html=True)
 
-    if not no_rec.empty:
-        # Sub-controls
-        t1c1, t1c2, t1c3 = st.columns([2,1.5,1.5])
-        with t1c1:
-            t1_srch = st.text_input("🔍 Search", placeholder="Name, RAMA, voucher, doctor…",
-                                     key="t1_srch")
-        with t1c2:
-            t1_doc = st.selectbox("Filter by Prescriber",
-                ["All"] + sorted(no_rec["ph_doctor"].unique().tolist()),
-                key="t1_doc")
-        with t1c3:
-            t1_min = st.number_input("Min insurance (RWF)", 0, value=0, step=5000, key="t1_min")
+    ufc1, ufc2, ufc3, ufc4 = st.columns([2, 1.2, 1.5, 1])
+    with ufc1:
+        uf_srch = st.text_input("🔍 Search",
+            placeholder="Name, RAMA, voucher, doctor, facility…", key="uf_srch")
+    with ufc2:
+        uf_status = st.multiselect("Status",
+            ["NO_RECORD", "UNLINKED", "MATCHED"],
+            default=["NO_RECORD", "UNLINKED", "MATCHED"],
+            key="uf_status")
+    with ufc3:
+        _doc_opts = sorted(unified_df["_doc"].dropna().unique().tolist())
+        uf_doc = st.selectbox("Filter by Prescriber",
+            ["All"] + _doc_opts, key="uf_doc")
+    with ufc4:
+        uf_min = st.number_input("Min insurance (RWF)", 0, value=0, step=5000, key="uf_min")
 
-        t1_disp = no_rec.copy()
-        if t1_srch:
-            mask = t1_disp.apply(
-                lambda c: c.astype(str).str.contains(t1_srch, case=False, na=False)
-            ).any(axis=1)
-            t1_disp = t1_disp[mask]
-        if t1_doc != "All":
-            t1_disp = t1_disp[t1_disp["ph_doctor"] == t1_doc]
-        if t1_min > 0:
-            t1_disp = t1_disp[t1_disp["ph_ins"] >= t1_min]
+    uf_disp = unified_df.copy()
+    if uf_srch:
+        _mask = uf_disp.apply(
+            lambda c: c.astype(str).str.contains(uf_srch, case=False, na=False)
+        ).any(axis=1)
+        uf_disp = uf_disp[_mask]
+    if uf_status:
+        uf_disp = uf_disp[uf_disp["status"].isin(uf_status)]
+    if uf_doc != "All":
+        uf_disp = uf_disp[uf_disp["_doc"] == uf_doc]
+    if uf_min > 0:
+        uf_disp = uf_disp[uf_disp["_ins"] >= uf_min]
 
-        # Build clean display table
-        t1_show = t1_disp[[
-            "ph_voucher","ph_patient","ph_rama","ph_date",
-            "ph_ins","ph_total","ph_doctor","ph_dept"
-        ]].copy()
-        t1_show.columns = [
-            "Pharmacy Voucher","Patient Name","RAMA Number","Dispensing Date",
-            "Insurance Claim (RWF)","Total Cost (RWF)","Prescriber","Specialty"
-        ]
-        t1_show["Dispensing Date"] = pd.to_datetime(
-            t1_show["Dispensing Date"], errors="coerce"
-        ).dt.strftime("%d/%m/%Y").fillna("—")
-        t1_show = t1_show.sort_values("Insurance Claim (RWF)", ascending=False)
-        t1_show.index = range(1, len(t1_show)+1)
+    # Build display copy: drop internal _* helpers, keep original + match columns
+    _helper_drop = [c for c in uf_disp.columns
+                    if c.startswith("_") and c not in ("status",)]
+    uf_show = uf_disp.drop(columns=_helper_drop, errors="ignore").copy()
 
-        st.markdown(
-            f"<div style='font-size:11px;color:{MUTED};font-family:monospace;margin-bottom:6px'>"
-            f"Showing <b style='color:#f87171'>{len(t1_show):,}</b> vouchers · "
-            f"Insurance at risk: <b style='color:#ef4444'>RWF {t1_disp['ph_ins'].sum():,.0f}</b>"
-            f"</div>", unsafe_allow_html=True
-        )
-        st.dataframe(t1_show, use_container_width=True, height=340)
+    # Move status to first column
+    _other_cols = [c for c in uf_show.columns if c != "status"]
+    uf_show = uf_show[["status"] + _other_cols]
 
-        # Prescriber risk breakdown
-        with st.expander("📊 Prescriber risk breakdown (Table 1)", expanded=False):
-            doc_risk = (no_rec.groupby("ph_doctor")["ph_ins"]
-                        .agg(Vouchers="count", Total_Claimed="sum")
-                        .sort_values("Total_Claimed", ascending=False)
-                        .reset_index())
-            doc_risk.columns = ["Prescriber","Vouchers","Total Claimed (RWF)"]
-            st.dataframe(doc_risk, use_container_width=True, height=280)
+    # Format date columns
+    for _dc in [dt_c, "fac_date"]:
+        if _dc and _dc in uf_show.columns:
+            uf_show[_dc] = pd.to_datetime(uf_show[_dc], errors="coerce"
+                           ).dt.strftime("%d/%m/%Y").fillna("—")
 
-        # Download
-        t1_buf = io.BytesIO()
-        _t1_xl = no_rec.copy()
-        _t1_xl["ph_date"] = pd.to_datetime(_t1_xl["ph_date"], errors="coerce").dt.strftime("%d/%m/%Y")
-        with pd.ExcelWriter(t1_buf, engine="openpyxl") as xw:
-            from openpyxl.styles import PatternFill as _PF, Font as _F, Alignment as _Al
-            _t1_xl.to_excel(xw, index=False, sheet_name="No Facility Record")
-            ws = xw.sheets["No Facility Record"]
-            hf = _PF("solid", fgColor="7F1D1D")
-            for cell in ws[1]:
-                cell.fill = hf
-                cell.font = _F(bold=True, color="FFFFFF", name="Arial", size=10)
-                cell.alignment = _Al(horizontal="center", wrap_text=True)
-            for i, r in enumerate(ws.iter_rows(min_row=2), 2):
-                bg = "FFE4E4" if i%2==0 else "FFFFFF"
-                for c in r: c.fill = _PF("solid", fgColor=bg)
-        t1_buf.seek(0)
-        st.download_button("⬇️ Download Table 1", t1_buf.getvalue(),
-            "table1_no_facility_record.xlsx",
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            key="dl_t1")
+    # Fill facility columns with "—" for NO_RECORD rows (display only)
+    _fac_cols = ["fac_name", "fac_date", "fac_source", "fac_voucher",
+                 "days_apart", "name_score"]
+    _norec_mask = uf_show["status"] == "NO_RECORD"
+    for _fc in _fac_cols:
+        if _fc in uf_show.columns:
+            uf_show.loc[_norec_mask, _fc] = uf_show.loc[_norec_mask, _fc].fillna("—")
 
-    st.markdown("<hr style='border-color:#1e2a38;margin:28px 0'>", unsafe_allow_html=True)
+    # Emoji status labels
+    _status_label = {"NO_RECORD": "🔴 NO_RECORD", "UNLINKED": "🟡 UNLINKED", "MATCHED": "✅ MATCHED"}
+    uf_show["status"] = uf_show["status"].map(_status_label)
+    uf_show.index = range(1, len(uf_show) + 1)
 
-    # ── TABLE 2: UNLINKED (RAMA found, visit not linked) ──────────────────────
-    st.markdown(f"""
-<div class='fraud-card fraud-card-amber'>
-  <div style='display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px'>
-    <div>
-      <span style='font-size:16px;font-weight:800;color:#fbbf24;font-family:Syne,sans-serif'>
-        🟡 Table 2 — RAMA Found, Visit Not Linked
-      </span>
-      <span class='badge badge-amber' style='margin-left:10px'>{len(unlinked):,} vouchers</span>
-      <span class='badge badge-amber' style='margin-left:6px'>RWF {unlinked_ins:,.0f}</span>
-    </div>
-    <span style='font-size:11px;color:#92400e;font-family:monospace'>
-      Patient exists in a facility file but dispensing date is outside the ±{date_window}-day window
-    </span>
-  </div>
-</div>""", unsafe_allow_html=True)
+    # Per-row color styling
+    _STATUS_BG = {"🔴 NO_RECORD": "#FFE4E4", "🟡 UNLINKED": "#FEF3C7", "✅ MATCHED": "#E7F5EC"}
+    _STATUS_FG = {"🔴 NO_RECORD": "#7F1D1D", "🟡 UNLINKED": "#78350F", "✅ MATCHED": "#14532D"}
 
-    if not unlinked.empty:
-        t2c1, t2c2 = st.columns([2,1])
-        with t2c1:
-            t2_srch = st.text_input("🔍 Search", placeholder="Name, RAMA…", key="t2_srch")
-        with t2c2:
-            t2_max_gap = st.number_input("Max days apart to show", 1, 365, 60, key="t2_gap")
+    def _color_rows(row):
+        bg = _STATUS_BG.get(row["status"], "#FFFFFF")
+        fg = _STATUS_FG.get(row["status"], "#111827")
+        return [f"background-color:{bg};color:{fg}" for _ in row]
 
-        t2_disp = unlinked.copy()
-        if t2_srch:
-            mask = t2_disp.apply(
-                lambda c: c.astype(str).str.contains(t2_srch, case=False, na=False)
-            ).any(axis=1)
-            t2_disp = t2_disp[mask]
-        if t2_max_gap:
-            t2_disp = t2_disp[
-                t2_disp["days_apart"].isna() | (t2_disp["days_apart"] <= t2_max_gap)
-            ]
+    _n_norec   = len(uf_disp[uf_disp["status"]=="NO_RECORD"])
+    _n_unlinked = len(uf_disp[uf_disp["status"]=="UNLINKED"])
+    _n_matched  = len(uf_disp[uf_disp["status"]=="MATCHED"])
 
-        t2_show = t2_disp[[
-            "ph_voucher","ph_patient","ph_rama","ph_date","ph_ins",
-            "fac_name","fac_date","fac_source","days_apart","name_score"
-        ]].copy()
-        t2_show.columns = [
-            "Pharmacy Voucher","Pharmacy Patient","RAMA","Pharmacy Date","Insurance (RWF)",
-            "Facility Patient","Facility Visit Date","Facility","Days Apart","Name Score"
-        ]
-        for dcol in ["Pharmacy Date","Facility Visit Date"]:
-            t2_show[dcol] = pd.to_datetime(t2_show[dcol], errors="coerce").dt.strftime("%d/%m/%Y").fillna("—")
-        t2_show = t2_show.sort_values("Days Apart", na_position="last")
-        t2_show.index = range(1, len(t2_show)+1)
+    st.markdown(
+        f"<div style='font-size:11px;color:{MUTED};font-family:monospace;margin-bottom:6px'>"
+        f"Showing <b style='color:#e2e8f0'>{len(uf_show):,}</b> findings · "
+        f"🔴 <b style='color:#f87171'>{_n_norec:,}</b> no record · "
+        f"🟡 <b style='color:#fbbf24'>{_n_unlinked:,}</b> unlinked · "
+        f"✅ <b style='color:#4ade80'>{_n_matched:,}</b> verified"
+        f"</div>", unsafe_allow_html=True
+    )
+    st.dataframe(uf_show.style.apply(_color_rows, axis=1),
+                 use_container_width=True, height=500)
 
-        st.markdown(
-            f"<div style='font-size:11px;color:{MUTED};font-family:monospace;margin-bottom:6px'>"
-            f"Showing <b style='color:#fbbf24'>{len(t2_show):,}</b> vouchers · "
-            f"Insurance: <b style='color:#f59e0b'>RWF {t2_disp['ph_ins'].sum():,.0f}</b>"
-            f"</div>", unsafe_allow_html=True
-        )
-        st.dataframe(t2_show, use_container_width=True, height=300)
-
-        t2_buf = io.BytesIO()
-        _t2_xl = t2_disp.copy()
-        _t2_xl["ph_date"]  = pd.to_datetime(_t2_xl["ph_date"],  errors="coerce").dt.strftime("%d/%m/%Y")
-        _t2_xl["fac_date"] = pd.to_datetime(_t2_xl["fac_date"], errors="coerce").dt.strftime("%d/%m/%Y")
-        with pd.ExcelWriter(t2_buf, engine="openpyxl") as xw:
-            from openpyxl.styles import PatternFill as _PF, Font as _F, Alignment as _Al
-            _t2_xl.to_excel(xw, index=False, sheet_name="Unlinked Visits")
-            ws = xw.sheets["Unlinked Visits"]
-            for cell in ws[1]:
-                cell.fill = _PF("solid", fgColor="78350F")
-                cell.font = _F(bold=True, color="FFFFFF", name="Arial", size=10)
-                cell.alignment = _Al(horizontal="center", wrap_text=True)
-            for i, r in enumerate(ws.iter_rows(min_row=2), 2):
-                bg = "FEF3C7" if i%2==0 else "FFFFFF"
-                for c in r: c.fill = _PF("solid", fgColor=bg)
-        t2_buf.seek(0)
-        st.download_button("⬇️ Download Table 2", t2_buf.getvalue(),
-            "table2_unlinked_visits.xlsx",
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            key="dl_t2")
-
-    st.markdown("<hr style='border-color:#1e2a38;margin:28px 0'>", unsafe_allow_html=True)
-
-    # ── TABLE 3: MATCHED (verified, informational) ────────────────────────────
-    st.markdown(f"""
-<div class='fraud-card fraud-card-green'>
-  <div style='display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px'>
-    <div>
-      <span style='font-size:16px;font-weight:800;color:#4ade80;font-family:Syne,sans-serif'>
-        ✅ Table 3 — Verified: Hospital Visit + Pharmacy Dispensing Linked
-      </span>
-      <span class='badge badge-green' style='margin-left:10px'>{len(matched):,} vouchers</span>
-      <span class='badge badge-green' style='margin-left:6px'>RWF {matched_ins:,.0f}</span>
-    </div>
-    <span style='font-size:11px;color:#14532d;font-family:monospace'>
-      Legitimate patient journey confirmed — clinic visit → pharmacy dispensing
-    </span>
-  </div>
-</div>""", unsafe_allow_html=True)
-
-    with st.expander("View verified records (Table 3)", expanded=False):
-        t3_search = st.text_input("🔍 Search verified records", key="t3_srch")
-        t3_show = matched[[
-            "ph_voucher","ph_patient","ph_rama","ph_date","ph_ins",
-            "fac_voucher","fac_name","fac_date","fac_source","days_apart","name_score"
-        ]].copy()
-        t3_show.columns = [
-            "Pharmacy Voucher","Pharmacy Patient","RAMA","Pharmacy Date","Insurance (RWF)",
-            "Facility Voucher","Facility Patient","Facility Date","Facility","Days Apart","Name Score"
-        ]
-        for dcol in ["Pharmacy Date","Facility Date"]:
-            t3_show[dcol] = pd.to_datetime(t3_show[dcol], errors="coerce").dt.strftime("%d/%m/%Y").fillna("—")
-        if t3_search:
-            mask = t3_show.apply(
-                lambda c: c.astype(str).str.contains(t3_search, case=False, na=False)
-            ).any(axis=1)
-            t3_show = t3_show[mask]
-        t3_show = t3_show.sort_values("Days Apart").reset_index(drop=True)
-        t3_show.index = t3_show.index + 1
-        st.dataframe(t3_show, use_container_width=True, height=300)
+    with st.expander("📊 Prescriber risk breakdown — all findings", expanded=False):
+        _doc_risk = (res_df.groupby("_doc")["_ins"]
+                     .agg(Vouchers="count", Total_Claimed="sum")
+                     .sort_values("Total_Claimed", ascending=False)
+                     .reset_index())
+        _doc_risk.columns = ["Prescriber", "Vouchers", "Total Claimed (RWF)"]
+        st.dataframe(_doc_risk, use_container_width=True, height=280)
 
     st.markdown("<hr style='border-color:#1e2a38;margin:28px 0'>", unsafe_allow_html=True)
 
@@ -3873,7 +3782,7 @@ with tab_xfac:
     st.markdown('<div class="sec-head">⬇️ Download Full Fraud Detection Report</div>',
                 unsafe_allow_html=True)
 
-    if st.button("📊 Generate Full Report (4 sheets)", type="primary", key="fd_gen"):
+    if st.button("📊 Generate Full Report (2 sheets)", type="primary", key="fd_gen"):
         from openpyxl import Workbook as _WB
         from openpyxl.styles import (PatternFill as _PF, Font as _F,
                                      Alignment as _Al, Border as _B, Side as _S)
@@ -3883,7 +3792,15 @@ with tab_xfac:
         THIN = _S(border_style="thin", color="CCCCCC")
         BDR  = _B(left=THIN,right=THIN,top=THIN,bottom=THIN)
 
-        def _make_sheet(wb, title, data_df, hdr_color, row_colors):
+        def _fmt_date(s):
+            return pd.to_datetime(s, errors="coerce").dt.strftime("%d/%m/%Y").fillna("")
+
+        def _make_sheet_colored(wb, title, data_df, hdr_color):
+            _ROW_COLORS = {
+                "NO_RECORD": "FFE4E4",
+                "UNLINKED":  "FEF3C7",
+                "MATCHED":   "E7F5EC",
+            }
             ws = wb.create_sheet(title)
             for ci, col in enumerate(data_df.columns, 1):
                 c = ws.cell(1, ci, col)
@@ -3895,7 +3812,8 @@ with tab_xfac:
             ws.row_dimensions[1].height = 30
             ws.freeze_panes = "A2"
             for ri, (_, row) in enumerate(data_df.iterrows(), 2):
-                bg = row_colors[ri % len(row_colors)]
+                row_status = str(row.get("status", ""))
+                bg = _ROW_COLORS.get(row_status, "FFFFFF")
                 for ci, val in enumerate(row, 1):
                     v = "" if (isinstance(val, float) and math.isnan(val)) else val
                     c = ws.cell(ri, ci, v)
@@ -3941,27 +3859,19 @@ with tab_xfac:
         ws0.column_dimensions["A"].width = 38
         ws0.column_dimensions["B"].width = 22
 
-        # Sheet 1: No record
-        def _fmt_date(s):
-            return pd.to_datetime(s, errors="coerce").dt.strftime("%d/%m/%Y").fillna("")
-        t1_xl = no_rec[["ph_voucher","ph_patient","ph_rama","ph_date","ph_ins","ph_total","ph_doctor","ph_dept"]].copy()
-        t1_xl.columns = ["Voucher","Patient Name","RAMA Number","Dispensing Date","Insurance (RWF)","Total Cost (RWF)","Prescriber","Specialty"]
-        t1_xl["Dispensing Date"] = _fmt_date(t1_xl["Dispensing Date"])
-        _make_sheet(wb, "1 - No Facility Record", t1_xl, "7F1D1D", ["FFE4E4","FFFFFF"])
-
-        # Sheet 2: Unlinked
-        t2_xl = unlinked[["ph_voucher","ph_patient","ph_rama","ph_date","ph_ins","fac_name","fac_date","fac_source","days_apart","name_score"]].copy()
-        t2_xl.columns = ["Voucher","Patient Name","RAMA","Pharmacy Date","Insurance (RWF)","Facility Patient","Facility Date","Facility","Days Apart","Name Score"]
-        t2_xl["Pharmacy Date"] = _fmt_date(t2_xl["Pharmacy Date"])
-        t2_xl["Facility Date"] = _fmt_date(t2_xl["Facility Date"])
-        _make_sheet(wb, "2 - Unlinked Visits", t2_xl, "78350F", ["FEF3C7","FFFFFF"])
-
-        # Sheet 3: Verified
-        t3_xl = matched[["ph_voucher","ph_patient","ph_rama","ph_date","ph_ins","fac_voucher","fac_name","fac_date","fac_source","days_apart","name_score"]].copy()
-        t3_xl.columns = ["Voucher","Patient Name","RAMA","Pharmacy Date","Insurance (RWF)","Facility Voucher","Facility Patient","Facility Date","Facility","Days Apart","Name Score"]
-        t3_xl["Pharmacy Date"] = _fmt_date(t3_xl["Pharmacy Date"])
-        t3_xl["Facility Date"] = _fmt_date(t3_xl["Facility Date"])
-        _make_sheet(wb, "3 - Verified", t3_xl, "14532D", ["E7F5EC","FFFFFF"])
+        # Sheet 1: All Findings (all original pharmacy columns + match columns, color-coded by status)
+        all_xl = unified_df.drop(
+            columns=[c for c in unified_df.columns if c.startswith("_")],
+            errors="ignore"
+        ).copy()
+        # Move status to first column
+        _xl_other = [c for c in all_xl.columns if c != "status"]
+        all_xl = all_xl[["status"] + _xl_other]
+        # Format date columns
+        for _dc in [dt_c, "fac_date"]:
+            if _dc and _dc in all_xl.columns:
+                all_xl[_dc] = _fmt_date(all_xl[_dc])
+        _make_sheet_colored(wb, "All Findings", all_xl, "1E3A5F")
 
         buf = io.BytesIO(); wb.save(buf); buf.seek(0)
         st.success("✅ Full report ready!")
