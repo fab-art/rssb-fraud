@@ -3739,6 +3739,20 @@ with tab_xfac:
         if _fc in uf_show.columns:
             uf_show.loc[_norec_mask, _fc] = uf_show.loc[_norec_mask, _fc].fillna("—")
 
+    # Clean fac_source into a readable health facility name and rename column
+    if "fac_source" in uf_show.columns:
+        _cleaned = (uf_show["fac_source"]
+            .fillna("")
+            .astype(str)
+            .str.replace(r'\.xlsx?$|\.csv$|\.xls$', '', regex=True, flags=re.IGNORECASE)
+            .str.replace(r'[_\-]+', ' ', regex=True)
+            .str.strip()
+            .str.title()
+        )
+        # preserve "—" sentinels applied above for NO_RECORD rows
+        uf_show["fac_source"] = _cleaned.where(uf_show["fac_source"] != "—", "—")
+        uf_show = uf_show.rename(columns={"fac_source": "Health Facility"})
+
     # Emoji status labels
     _status_label = {"NO_RECORD": "🔴 NO_RECORD", "UNLINKED": "🟡 UNLINKED", "MATCHED": "✅ MATCHED"}
     uf_show["status"] = uf_show["status"].map(_status_label)
@@ -3871,6 +3885,17 @@ with tab_xfac:
         for _dc in [dt_c, "fac_date"]:
             if _dc and _dc in all_xl.columns:
                 all_xl[_dc] = _fmt_date(all_xl[_dc])
+        # Clean fac_source into a readable health facility name
+        if "fac_source" in all_xl.columns:
+            all_xl["fac_source"] = (all_xl["fac_source"]
+                .fillna("")
+                .astype(str)
+                .str.replace(r'\.xlsx?$|\.csv$|\.xls$', '', regex=True, flags=re.IGNORECASE)
+                .str.replace(r'[_\-]+', ' ', regex=True)
+                .str.strip()
+                .str.title()
+            )
+            all_xl = all_xl.rename(columns={"fac_source": "Health Facility"})
         _make_sheet_colored(wb, "All Findings", all_xl, "1E3A5F")
 
         buf = io.BytesIO(); wb.save(buf); buf.seek(0)
