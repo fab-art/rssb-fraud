@@ -3829,7 +3829,10 @@ with tab_xfac:
                 row_status = str(row.get("status", ""))
                 bg = _ROW_COLORS.get(row_status, "FFFFFF")
                 for ci, val in enumerate(row, 1):
-                    v = "" if (isinstance(val, float) and math.isnan(val)) else val
+                    try:
+                        v = "" if pd.isna(val) else val
+                    except (TypeError, ValueError):
+                        v = val
                     c = ws.cell(ri, ci, v)
                     c.font = _F(name="Arial", size=10)
                     c.fill = _PF("solid", fgColor=bg)
@@ -3896,6 +3899,10 @@ with tab_xfac:
                 .str.title()
             )
             all_xl = all_xl.rename(columns={"fac_source": "Health Facility"})
+        # Convert nullable numeric columns to plain Python-compatible types
+        for _nc in ["days_apart", "name_score"]:
+            if _nc in all_xl.columns:
+                all_xl[_nc] = pd.to_numeric(all_xl[_nc], errors="coerce")
         _make_sheet_colored(wb, "All Findings", all_xl, "1E3A5F")
 
         buf = io.BytesIO(); wb.save(buf); buf.seek(0)
