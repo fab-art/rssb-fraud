@@ -5,7 +5,7 @@ Install:
     pip install streamlit pandas matplotlib networkx openpyxl odfpy
 
 Run:
-    streamlit run pharmascan_streamlit.py
+    streamlit run app.py
 """
 
 import difflib
@@ -58,45 +58,91 @@ plt.rcParams.update({
 # ── CSS ───────────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Mono&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Mono:wght@400;500&display=swap');
 
+/* ── Base ─────────────────────────────────────────────────────────────────── */
 .stApp { background: #080c10; }
-section[data-testid="stSidebar"] { background: #0d1117 !important; border-right: 1px solid #1e2a38; }
+section[data-testid="stSidebar"] {
+    background: #0d1117 !important;
+    border-right: 1px solid #1e2a38;
+}
 
+/* Custom scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: #0d1117; }
+::-webkit-scrollbar-thumb { background: #1e2a38; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #2d3f54; }
+
+/* ── Metric cards ─────────────────────────────────────────────────────────── */
 [data-testid="stMetric"] {
     background: #111720; border: 1px solid #1e2a38;
     border-radius: 12px; padding: 16px 20px !important;
+    transition: border-color .2s, box-shadow .2s;
 }
-[data-testid="stMetricLabel"] { color: #64748b !important; font-size: 11px !important; text-transform: uppercase; letter-spacing: .5px; }
-[data-testid="stMetricValue"] { color: #e2e8f0 !important; font-size: 26px !important; font-weight: 800 !important; font-family: 'Syne', sans-serif !important; }
+[data-testid="stMetric"]:hover {
+    border-color: #2d3f54;
+    box-shadow: 0 4px 20px rgba(0,0,0,.3);
+}
+[data-testid="stMetricLabel"] {
+    color: #64748b !important; font-size: 11px !important;
+    text-transform: uppercase; letter-spacing: .5px;
+}
+[data-testid="stMetricValue"] {
+    color: #e2e8f0 !important; font-size: 26px !important;
+    font-weight: 800 !important; font-family: 'Syne', sans-serif !important;
+}
+[data-testid="stMetricDelta"] { font-size: 11px !important; font-family: 'DM Mono', monospace !important; }
 
-.stTabs [data-baseweb="tab-list"] { background: #0d1117; border-bottom: 1px solid #1e2a38; gap: 4px; }
-.stTabs [data-baseweb="tab"] { background: transparent; color: #64748b; font-weight: 600; border-radius: 0; border-bottom: 2px solid transparent; padding: 10px 18px; }
-.stTabs [aria-selected="true"] { color: #00e5a0 !important; border-bottom: 2px solid #00e5a0 !important; background: transparent !important; }
+/* ── Tabs ─────────────────────────────────────────────────────────────────── */
+.stTabs [data-baseweb="tab-list"] {
+    background: #0d1117; border-bottom: 1px solid #1e2a38;
+    gap: 2px; padding: 0 4px;
+}
+.stTabs [data-baseweb="tab"] {
+    background: transparent; color: #64748b; font-weight: 600;
+    border-radius: 0; border-bottom: 2px solid transparent;
+    padding: 10px 16px; transition: color .15s;
+    font-size: 13px;
+}
+.stTabs [data-baseweb="tab"]:hover { color: #94a3b8; }
+.stTabs [aria-selected="true"] {
+    color: #00e5a0 !important;
+    border-bottom: 2px solid #00e5a0 !important;
+    background: transparent !important;
+}
 
+/* ── Typography ───────────────────────────────────────────────────────────── */
 h1, h2, h3 { font-family: 'Syne', sans-serif !important; }
 
+/* ── Sidebar text ─────────────────────────────────────────────────────────── */
 .sidebar-title { font-family: 'Syne', sans-serif; font-size: 22px; font-weight: 800; color: #e2e8f0; margin-bottom: 4px; }
 .sidebar-sub   { font-size: 12px; color: #64748b; margin-bottom: 20px; }
 
+/* ── Chips / tags ─────────────────────────────────────────────────────────── */
 .chip-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .chip {
     background: rgba(14,165,233,.08); border: 1px solid rgba(14,165,233,.2);
     border-radius: 6px; padding: 3px 10px; font-size: 11px;
     font-family: 'DM Mono', monospace; color: #0ea5e9;
+    transition: background .15s, border-color .15s;
 }
+.chip:hover { background: rgba(14,165,233,.16); border-color: rgba(14,165,233,.4); }
+
+/* ── Info banner ──────────────────────────────────────────────────────────── */
 .info-banner {
     background: rgba(14,165,233,.06); border: 1px solid rgba(14,165,233,.2);
     border-radius: 10px; padding: 14px 18px; margin-bottom: 16px;
 }
 .info-banner b { color: #0ea5e9; }
 
+/* ── Section heading ──────────────────────────────────────────────────────── */
 .sec-head {
     font-family: 'Syne', sans-serif; font-size: 15px; font-weight: 700;
     color: #e2e8f0; padding-left: 10px; border-left: 3px solid #00e5a0;
     margin: 20px 0 12px;
 }
 
+/* ── Rapid-revisit cards ──────────────────────────────────────────────────── */
 .rapid-card {
     background: #111720; border: 1px solid #1e2a38;
     border-left: 3px solid #f59e0b; border-radius: 10px; padding: 12px 14px;
@@ -109,6 +155,45 @@ h1, h2, h3 { font-family: 'Syne', sans-serif !important; }
 .rapid-card.crit .rc-days { color: #ef4444; }
 .rc-days small { font-size: 11px; font-weight: 400; }
 .rc-meta { font-size: 11px; color: #64748b; font-family: 'DM Mono', monospace; margin-top: 5px; }
+
+/* ── Streamlit alert boxes — dark theme overrides ─────────────────────────── */
+[data-testid="stAlert"] { border-radius: 10px !important; }
+div[data-baseweb="notification"] { border-radius: 10px !important; }
+
+/* ── Input / select fields ────────────────────────────────────────────────── */
+[data-testid="stTextInput"] input,
+[data-testid="stNumberInput"] input {
+    background: #111720 !important; border-color: #1e2a38 !important;
+    color: #e2e8f0 !important; border-radius: 8px !important;
+}
+[data-testid="stTextInput"] input:focus,
+[data-testid="stNumberInput"] input:focus {
+    border-color: #00e5a0 !important;
+    box-shadow: 0 0 0 1px #00e5a0 !important;
+}
+
+/* ── Buttons ──────────────────────────────────────────────────────────────── */
+[data-testid="stDownloadButton"] button,
+button[kind="secondary"] {
+    border-radius: 8px !important;
+    font-family: 'DM Mono', monospace !important;
+    font-size: 12px !important;
+    transition: border-color .15s, color .15s !important;
+}
+
+/* ── Expander ─────────────────────────────────────────────────────────────── */
+[data-testid="stExpander"] {
+    border: 1px solid #1e2a38 !important;
+    border-radius: 10px !important;
+    background: #0d1117 !important;
+}
+[data-testid="stExpander"] summary { color: #94a3b8 !important; }
+
+/* ── Caption / small text ─────────────────────────────────────────────────── */
+[data-testid="stCaptionContainer"] { color: #475569 !important; font-family: 'DM Mono', monospace !important; font-size: 11px !important; }
+
+/* ── Radio buttons ────────────────────────────────────────────────────────── */
+[data-testid="stRadio"] label { font-size: 13px !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -182,12 +267,13 @@ def load_and_process(file_bytes: bytes, filename: str, rapid_days: int):
             renamed[col] = key
     df = df.rename(columns=renamed)
 
-    # Parse dates
+    # Parse dates (handles both NumPy object and PyArrow string dtypes)
     if "visit_date" in df.columns:
         df["visit_date"] = pd.to_datetime(df["visit_date"], errors="coerce")
     else:
         for col in df.columns:
-            if df[col].dtype == object:
+            _dstr = str(df[col].dtype)
+            if _dstr == "object" or "string" in _dstr or "large_string" in _dstr:
                 try:
                     parsed = pd.to_datetime(df[col], errors="coerce")
                     if parsed.notna().sum() > len(df) * 0.5:
@@ -237,23 +323,19 @@ def load_and_process(file_bytes: bytes, filename: str, rapid_days: int):
         if "visit_date" in rdf.columns:
             rdf = rdf.sort_values([id_col, "visit_date"])
         repeat_detail = rdf.head(500)
-        for pid in repeat_ids[:300]:
-            grp = df[df[id_col] == pid]
+        # Use groupby instead of per-patient DataFrame scans (O(n) vs O(n×m))
+        has_name = "patient_name" in rdf.columns and id_col != "patient_name"
+        has_date = "visit_date" in rdf.columns
+        top_rdf  = rdf[rdf[id_col].isin(repeat_ids[:300])]
+        for pid, grp in top_rdf.groupby(id_col, sort=False):
             entry = {id_col: str(pid), "visits": int(len(grp))}
-            if "patient_name" in grp.columns and id_col != "patient_name":
+            if has_name:
                 entry["patient_name"] = str(grp["patient_name"].iloc[0])
-            if "visit_date" in grp.columns:
+            if has_date:
                 dates = grp["visit_date"].dropna().sort_values()
                 entry["dates"] = ", ".join(str(d.date()) for d in dates if pd.notna(d))
             repeat_groups.append(entry)
         repeat_groups.sort(key=lambda x: x["visits"], reverse=True)
-
-    # Fuzzy duplicate detection (RAMA + name)
-    fuzzy_repeat_groups: list = []
-    try:
-        fuzzy_repeat_groups = detect_fuzzy_repeat_patients(df)
-    except Exception:
-        fuzzy_repeat_groups = []
 
     # Rapid revisits (optimized using groupby and diff instead of nested loops)
     rapid = []
@@ -296,23 +378,26 @@ def load_and_process(file_bytes: bytes, filename: str, rapid_days: int):
         # Clean up temporary columns
         sub.drop(columns=["_prev_date", "_days_diff"], inplace=True, errors="ignore")
 
-    return df, renamed, s, repeat_groups, repeat_detail, rapid, fuzzy_repeat_groups
+    return df, renamed, s, repeat_groups, repeat_detail, rapid
 
 
 # ── Chart helpers ─────────────────────────────────────────────────────────────
 
 def hbar_chart(labels, values, color, title, xlabel):
+    if not values:
+        return None
+    max_val = max(values) or 1
     fig, ax = plt.subplots(figsize=(7, max(2.5, len(labels) * 0.42)))
     bars = ax.barh(labels[::-1], values[::-1],
                    color=color if isinstance(color, list) else [color] * len(labels),
                    height=0.65)
     for bar, val in zip(bars, values[::-1]):
-        ax.text(bar.get_width() + max(values) * 0.01,
+        ax.text(bar.get_width() + max_val * 0.01,
                 bar.get_y() + bar.get_height() / 2,
                 str(val), va="center", color=TEXT, fontsize=8)
     ax.set_xlabel(xlabel)
     ax.set_title(title, fontsize=11, fontweight="bold", color=TEXT, pad=10)
-    ax.set_xlim(0, max(values) * 1.2)
+    ax.set_xlim(0, max_val * 1.2)
     ax.spines[["top", "right"]].set_visible(False)
     ax.grid(axis="x", alpha=0.3)
     fig.tight_layout()
@@ -806,6 +891,12 @@ function closeInfo() {{
 
 
 def fmt_number(n):
+    try:
+        n = float(n)
+    except (TypeError, ValueError):
+        return str(n)
+    if n < 0:
+        return f"-{fmt_number(-n)}"
     if n >= 1e9:  return f"{n/1e9:.1f}B"
     if n >= 1e6:  return f"{n/1e6:.1f}M"
     if n >= 1e3:  return f"{n/1e3:.1f}K"
@@ -816,7 +907,10 @@ def fmt_number(n):
 
 def _toks(name: str) -> set:
     """Lowercase alpha-numeric tokens from a name string."""
-    return set(re.sub(r"[^a-z0-9 ]", "", name.lower()).split())
+    # Treat hyphens and underscores as word separators so that "Jean-Pierre"
+    # tokenises as {"jean", "pierre"} rather than the unrecognisable "jeanpierre".
+    s = re.sub(r"[-_]", " ", name.lower())
+    return set(re.sub(r"[^a-z0-9 ]", "", s).split())
 
 def _seq_ratio(a: str, b: str) -> float:
     sa = " ".join(sorted(_toks(a)))
@@ -983,214 +1077,142 @@ def apply_name_normalisation(df: pd.DataFrame, col: str,
     return df
 
 
-# ── RAMA / Patient-ID fuzzy helpers ──────────────────────────────────────────
+# ── Cross-facility RAMA normalisation + matching ──────────────────────────────
 
-def _norm_rama(rama_str: str) -> str:
-    """Normalise a RAMA/patient-ID string for comparison (strip non-alphanumeric)."""
-    return re.sub(r"[^a-z0-9]", "", str(rama_str).lower().strip())
+_CF_PREFIX_RE = re.compile(r"^(RWA?/?|RSSB/?)\s*", re.IGNORECASE)
+_CF_SEP_RE    = re.compile(r"[\s/\-]")
+_CF_LZERO_RE  = re.compile(r"^(0+)(\d+)$")
 
 
-def _rama_similarity(a: str, b: str) -> float:
+def normalize_rama(x) -> str:
     """
-    Similarity score (0-1) between two RAMA numbers.
-    Returns 1.0 for exact match, 0.0 if lengths differ by > 2 chars, else
-    SequenceMatcher ratio on the normalised strings.
+    Canonical form of a RAMA/affiliation number for cross-system matching.
+    Strips: common prefixes (RW/, RWA/, RSSB/), separators, leading zeros.
     """
-    na, nb = _norm_rama(a), _norm_rama(b)
-    if not na or not nb:
-        return 0.0
-    if na == nb:
-        return 1.0
-    if abs(len(na) - len(nb)) > 2:
-        return 0.0
-    return difflib.SequenceMatcher(None, na, nb).ratio()
+    s = _CF_PREFIX_RE.sub("", str(x).strip().upper())
+    s = _CF_SEP_RE.sub("", s)
+    m = _CF_LZERO_RE.match(s)
+    return m.group(2) if m else s
 
 
-def detect_fuzzy_repeat_patients(
-    df: pd.DataFrame,
-    name_thresh: float = 0.82,
-    rama_thresh: float = 0.88,
-) -> list[dict]:
+def run_match(
+    ph_work: pd.DataFrame,
+    fac_df: pd.DataFrame,
+    name_thresh: float = 0.4,
+    date_window: int = 7,
+    require_name: bool = True,
+) -> pd.DataFrame:
     """
-    Detect duplicate / repeat patients using a combination of:
-      • Exact RAMA-number match
-      • Fuzzy RAMA-number match  (similarity ≥ rama_thresh)
-      • Fuzzy patient-name match  (similarity ≥ name_thresh)
+    Match pharmacy vouchers against facility visit records.
 
-    Returns a list of dicts, each representing a group of suspected
-    duplicate patients:
-      {
-        "canonical_id":   str,   # most-common patient_id in the group
-        "canonical_name": str,   # most-common patient_name in the group
-        "members":        [ {patient_id, patient_name, visits, match_type, confidence} ],
-        "match_types":    set,   # e.g. {"EXACT_RAMA", "FUZZY_NAME"}
-        "confidence":     float, # average pairwise confidence
-        "total_visits":   int,
-      }
-    Only groups with ≥ 2 distinct (id, name) pairs are returned.
+    Columns consumed from ph_work : _rama, _name, _date, _vou, _ins, _tot, _doc, _dpt
+    Columns consumed from fac_df  : _rama, _name, _date, _source, voucher_id
+
+    Returns a DataFrame with one row per pharmacy voucher and columns:
+        status       – MATCHED | UNLINKED | NO_RECORD
+        confidence   – 0–1 composite (MATCHED only; 0.0 for others)
+        ph_voucher, ph_patient, ph_rama, ph_date, ph_ins, ph_total,
+        ph_doctor, ph_dept
+        fac_voucher, fac_name, fac_date, fac_source  (None for NO_RECORD)
+        days_apart   – signed int: ph_date − fac_date
+                       (negative ⇒ pharmacy dispensed BEFORE facility visit)
+        name_score   – raw name similarity 0–1
     """
-    has_id   = "patient_id"   in df.columns
-    has_name = "patient_name" in df.columns
+    ph  = ph_work.copy()
+    fac = fac_df.copy()
 
-    if not has_id and not has_name:
-        return []
+    ph["_rn"]  = ph["_rama"].apply(normalize_rama)
+    fac["_rn"] = fac["_rama"].apply(normalize_rama)
 
-    # ── Build unique (patient_id, patient_name, visit_count) records ─────────
-    group_cols = []
-    if has_id:   group_cols.append("patient_id")
-    if has_name: group_cols.append("patient_name")
+    # Build O(1) RAMA index from facility records
+    fac_index = _dd(list)
+    for fr in fac.to_dict("records"):
+        fac_index[fr["_rn"]].append(fr)
 
-    agg = df.groupby(group_cols, dropna=False).size().reset_index(name="_visits")
+    output_rows = []
+    for pr in ph.to_dict("records"):
+        candidates = fac_index.get(pr["_rn"], [])
 
-    # Coerce to string; replace NaN-like values with empty string
-    if has_id:
-        agg["patient_id"]   = agg["patient_id"].fillna("").astype(str).str.strip()
-    if has_name:
-        agg["patient_name"] = agg["patient_name"].fillna("").astype(str).str.strip()
-
-    records = agg.to_dict("records")
-    n = len(records)
-    if n < 2:
-        return []
-
-    # ── Union-Find (path compression) ────────────────────────────────────────
-    parent = list(range(n))
-
-    def find(x):
-        while parent[x] != x:
-            parent[x] = parent[parent[x]]
-            x = parent[x]
-        return x
-
-    def union(a, b):
-        pa, pb = find(a), find(b)
-        if pa != pb:
-            parent[pb] = pa
-
-    # Store match metadata per pair for confidence/type tracking
-    pair_meta: dict[tuple[int, int], tuple[float, str]] = {}
-
-    # Cap at 800 records to keep O(n²) feasible; prioritise by visit count
-    if n > 800:
-        records = sorted(records, key=lambda r: -r.get("_visits", 0))[:800]
-        n = 800
-
-    # ── Pairwise comparison ───────────────────────────────────────────────────
-    for i in range(n):
-        ri = records[i]
-        id_i   = ri.get("patient_id",   "") if has_id   else ""
-        nam_i  = ri.get("patient_name", "") if has_name else ""
-        norm_i = _norm_rama(id_i)
-
-        for j in range(i + 1, n):
-            rj = records[j]
-            id_j   = rj.get("patient_id",   "") if has_id   else ""
-            nam_j  = rj.get("patient_name", "") if has_name else ""
-            norm_j = _norm_rama(id_j)
-
-            match_type = None
-            confidence = 0.0
-
-            # 1) Exact RAMA match (non-empty)
-            if has_id and norm_i and norm_j and norm_i == norm_j:
-                match_type = "EXACT_RAMA"
-                confidence = 1.0
-
-            # 2) Fuzzy RAMA match
-            elif has_id and norm_i and norm_j:
-                rs = _rama_similarity(id_i, id_j)
-                if rs >= rama_thresh:
-                    match_type = "FUZZY_RAMA"
-                    confidence = rs
-
-            # 3) Fuzzy name match
-            if has_name and nam_i and nam_j:
-                ns, _why = _match_score(nam_i, nam_j)
-                if ns >= name_thresh:
-                    if match_type is None:
-                        match_type = "FUZZY_NAME"
-                        confidence = ns
-                    else:
-                        # Both RAMA and name match → strongest signal
-                        match_type = "MULTI_MATCH"
-                        confidence = round((confidence + ns) / 2, 4)
-
-            if match_type:
-                union(i, j)
-                key = (min(i, j), max(i, j))
-                # Keep highest-confidence label for this pair
-                if key not in pair_meta or confidence > pair_meta[key][0]:
-                    pair_meta[key] = (confidence, match_type)
-
-    # ── Build result groups ───────────────────────────────────────────────────
-    from collections import defaultdict as _dfd
-    clusters: dict[int, list[int]] = _dfd(list)
-    for idx in range(n):
-        clusters[find(idx)].append(idx)
-
-    results = []
-    for root, members_idx in clusters.items():
-        if len(members_idx) < 2:
+        if not candidates:
+            output_rows.append(_cf_no_record(pr))
             continue
 
-        # Collect pairwise metadata within this cluster
-        cluster_types: set = set()
-        cluster_confs: list = []
-        for ii in range(len(members_idx)):
-            for jj in range(ii + 1, len(members_idx)):
-                key = (min(members_idx[ii], members_idx[jj]),
-                       max(members_idx[ii], members_idx[jj]))
-                if key in pair_meta:
-                    conf, mtype = pair_meta[key]
-                    cluster_types.add(mtype)
-                    cluster_confs.append(conf)
+        best_fr   = None
+        best_conf = -1.0
+        best_days = None
+        best_ns   = 0.0
 
-        avg_conf = round(sum(cluster_confs) / len(cluster_confs), 3) if cluster_confs else 0.0
+        for fr in candidates:
+            ns, _     = _match_score(str(pr["_name"]), str(fr["_name"]))
+            name_ok   = (ns >= name_thresh) if require_name else True
+            days, dok = _cf_check_date(pr["_date"], fr["_date"], date_window)
+            if name_ok and dok:
+                conf = _cf_conf(ns, days, date_window)
+                if conf > best_conf:
+                    best_conf, best_fr, best_days, best_ns = conf, fr, days, ns
 
-        # Canonical ID/name = most frequent member
-        member_records = [records[i] for i in members_idx]
-        canonical_id   = max(
-            (r.get("patient_id",   "") for r in member_records),
-            key=lambda x: sum(r.get("patient_id","") == x for r in member_records),
-        ) if has_id else ""
-        canonical_name = max(
-            (r.get("patient_name", "") for r in member_records),
-            key=lambda x: sum(r.get("patient_name","") == x for r in member_records),
-        ) if has_name else ""
+        if best_fr is not None:
+            output_rows.append(_cf_matched(pr, best_fr, best_conf, best_days, best_ns))
+        else:
+            closest, closest_days = _cf_closest(candidates, pr["_date"])
+            closest_ns, _         = _match_score(str(pr["_name"]), str(closest["_name"]))
+            output_rows.append(_cf_unlinked(pr, closest, closest_days, closest_ns))
 
-        total_visits = sum(r.get("_visits", 0) for r in member_records)
+    return pd.DataFrame(output_rows)
 
-        members_out = []
-        for r in member_records:
-            # find best match_type for this member vs canonical
-            best_type = "UNKNOWN"
-            best_conf = 0.0
-            idx_r = records.index(r) if r in records else -1
-            for key, (c, t) in pair_meta.items():
-                if idx_r in key:
-                    if c > best_conf:
-                        best_conf = c
-                        best_type = t
-            members_out.append({
-                "patient_id":   r.get("patient_id",   ""),
-                "patient_name": r.get("patient_name", ""),
-                "visits":       int(r.get("_visits", 0)),
-                "match_type":   best_type,
-                "confidence":   round(best_conf, 3),
-            })
 
-        results.append({
-            "canonical_id":   canonical_id,
-            "canonical_name": canonical_name,
-            "members":        members_out,
-            "match_types":    cluster_types,
-            "confidence":     avg_conf,
-            "total_visits":   int(total_visits),
-        })
+def _cf_check_date(ph_date, fac_date, window):
+    if pd.isna(ph_date) or pd.isna(fac_date):
+        return None, False
+    days = (pd.Timestamp(ph_date) - pd.Timestamp(fac_date)).days
+    return days, (-1 <= days <= window)   # -1 buffer for same-day/timezone edge
 
-    results.sort(key=lambda x: (-x["confidence"], -x["total_visits"]))
-    return results
 
+def _cf_conf(name_score, days, window):
+    """40 % name quality + 60 % date proximity (1.0 same-day → 0.0 at window+1)."""
+    if days is None:
+        return 0.0
+    day_prox = 1.0 - max(days, 0) / (window + 1)
+    return round(0.4 * name_score + 0.6 * day_prox, 3)
+
+
+def _cf_closest(candidates, ph_date):
+    """Return (facility_row, signed_days) with the smallest absolute date gap."""
+    best, best_gap, best_signed = candidates[0], None, None
+    for fr in candidates:
+        if pd.notna(ph_date) and pd.notna(fr["_date"]):
+            signed = (pd.Timestamp(ph_date) - pd.Timestamp(fr["_date"])).days
+            gap    = abs(signed)
+            if best_gap is None or gap < best_gap:
+                best_gap, best_signed, best = gap, signed, fr
+    return best, best_signed
+
+
+def _cf_base(pr):
+    return {"ph_voucher": pr["_vou"], "ph_patient": pr["_name"],
+            "ph_rama": pr["_rama"],   "ph_date": pr["_date"],
+            "ph_ins": pr["_ins"],     "ph_total": pr["_tot"],
+            "ph_doctor": pr["_doc"],  "ph_dept": pr["_dpt"]}
+
+
+def _cf_no_record(pr):
+    return {**_cf_base(pr), "status": "NO_RECORD", "confidence": 0.0,
+            "fac_voucher": None, "fac_name": None, "fac_date": None,
+            "fac_source": None, "days_apart": None, "name_score": None}
+
+
+def _cf_matched(pr, fr, conf, days, ns):
+    return {**_cf_base(pr), "status": "MATCHED", "confidence": conf,
+            "fac_voucher": fr.get("voucher_id"), "fac_name": fr["_name"],
+            "fac_date": fr["_date"],  "fac_source": fr["_source"],
+            "days_apart": days,       "name_score": round(ns, 2)}
+
+
+def _cf_unlinked(pr, fr, days, ns):
+    return {**_cf_base(pr), "status": "UNLINKED", "confidence": 0.0,
+            "fac_voucher": fr.get("voucher_id"), "fac_name": fr["_name"],
+            "fac_date": fr["_date"],  "fac_source": fr["_source"],
+            "days_apart": days,       "name_score": round(ns, 2)}
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1654,16 +1676,16 @@ def run_rules_engine(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
     summary["rules_available"] = sorted(set(summary["rules_available"]))
 
     # Pre-build refill index: {(patient_id, drug_code): [sorted dates]}
+    # Uses groupby — much faster than iterrows on large datasets.
     refill_index = {}
     if id_col and drug_col and date_col:
-        sub = df[[id_col, drug_col, date_col]].dropna()
-        for _, row in sub.iterrows():
-            key = (str(row[id_col]).strip(), str(row[drug_col]).strip())
-            dt  = pd.to_datetime(row[date_col], errors="coerce")
-            if pd.notna(dt):
-                refill_index.setdefault(key, []).append(dt)
-        for key in refill_index:
-            refill_index[key].sort()
+        sub = df[[id_col, drug_col, date_col]].copy()
+        sub[date_col] = pd.to_datetime(sub[date_col], errors="coerce")
+        sub = sub.dropna(subset=[id_col, drug_col, date_col])
+        sub[id_col]   = sub[id_col].astype(str).str.strip()
+        sub[drug_col] = sub[drug_col].astype(str).str.strip()
+        for (pid, dcode), grp in sub.groupby([id_col, drug_col], sort=False):
+            refill_index[(pid, dcode)] = sorted(grp[date_col].tolist())
 
     for idx, row in df.iterrows():
         score    = 0
@@ -2508,7 +2530,6 @@ if _dl_committed:
     rapid_days = _dl["rapid_days"]
     repeat_groups  = _dl["repeat_groups"]
     repeat_detail  = _dl["repeat_detail"]
-    fuzzy_repeat_groups = _dl.get("fuzzy_repeat_groups", [])
     col_map        = _dl["col_map"]
     top_n          = st.session_state.get("sb_top_n", _dl.get("top_n", 15))
 else:
@@ -2519,7 +2540,6 @@ else:
     rapid_days = 7
     repeat_groups = []
     repeat_detail = pd.DataFrame()
-    fuzzy_repeat_groups = []
     col_map = {}
 
 # ── Helper: render a locked-tab placeholder ───────────────────────────────────
@@ -2585,13 +2605,17 @@ with tab_summary:
             colors = [DANGER if v >= 10 else WARN if v >= 5 else ACCENT for v in td["visits"]]
             fig = hbar_chart([str(x)[:22] for x in td["id"]], td["visits"].tolist(),
                              colors, "Top Patients (RAMA No.) by Visit Count", "Visits")
-            st.pyplot(fig, use_container_width=True); plt.close(fig)
+            if fig:
+                st.pyplot(fig, use_container_width=True)
+                plt.close(fig)
     with right:
         if "top_doctors" in s:
             td = s["top_doctors"].head(top_n)
             fig = hbar_chart([str(x)[:22] for x in td["doctor"]], td["visits"].tolist(),
                              ACCENT2, "Top Practitioners by Visit Volume", "Visits")
-            st.pyplot(fig, use_container_width=True); plt.close(fig)
+            if fig:
+                st.pyplot(fig, use_container_width=True)
+                plt.close(fig)
 
     # Practitioner type breakdown
     if "doctor_type" in df.columns:
@@ -2601,7 +2625,9 @@ with tab_summary:
             dt_vc.values.tolist(),
             PURPLE, "Visits by Practitioner Type", "Visits",
         )
-        st.pyplot(fig, use_container_width=True); plt.close(fig)
+        if fig:
+            st.pyplot(fig, use_container_width=True)
+            plt.close(fig)
 
     # Gender & patient type pie charts
     gc1, gc2 = st.columns(2)
@@ -2646,7 +2672,7 @@ with tab_repeat:
     # ── Sub-tab style: two internal sections via radio ─────────────────────
     _rp_section = st.radio(
         "View",
-        ["🔁 Repeat Patients", "🔬 Fuzzy Duplicates", "⚡ Rapid Revisits"],
+        ["🔁 Repeat Patients", "⚡ Rapid Revisits"],
         horizontal=True,
         label_visibility="collapsed",
         key="rp_section",
@@ -2760,7 +2786,7 @@ with tab_repeat:
                        f"≥5 visits: {sum(1 for g in repeat_groups if g['visits']>=5)} · "
                        f"≥10 visits: {sum(1 for g in repeat_groups if g['visits']>=10)}")
             st.dataframe(
-                _grp_df.style.applymap(_highlight_v, subset=["visits"]),
+                _grp_df.style.map(_highlight_v, subset=["visits"]),
                 use_container_width=True, height=360,
             )
 
@@ -2804,215 +2830,7 @@ with tab_repeat:
             )
 
     # ────────────────────────────────────────────────────────────────────────
-    # SECTION B — Fuzzy Duplicate Detection
-    # ────────────────────────────────────────────────────────────────────────
-    elif _rp_section == "🔬 Fuzzy Duplicates":
-        st.markdown("""
-<div class='info-banner'>
-  <b>🔬 Fuzzy Duplicate Detection</b><br>
-  This section flags patient records that appear to be the <b>same person</b> registered
-  under slightly different identifiers — catching <b>RAMA number typos</b> (e.g. <code>RW001234</code>
-  vs <code>RW00l234</code>) and <b>name spelling variations</b> (e.g. <i>Uwimana Jean</i> vs
-  <i>Jean Uwimana</i>). Both signals are combined for the highest confidence.
-</div>""", unsafe_allow_html=True)
-
-        if not fuzzy_repeat_groups:
-            st.success("✅ No fuzzy duplicates detected — all patient identifiers appear unique.")
-        else:
-            # ── Badge colour map ──────────────────────────────────────────────
-            _BADGE_COLORS = {
-                "EXACT_RAMA":  ("#ef4444", "#2d0a0a"),   # red — exact ID clash
-                "FUZZY_RAMA":  ("#f59e0b", "#2d1a00"),   # amber — near-ID match
-                "FUZZY_NAME":  ("#0ea5e9", "#001a2d"),   # blue — name similarity
-                "MULTI_MATCH": ("#a78bfa", "#160d2d"),   # purple — both signals
-                "UNKNOWN":     ("#64748b", "#111720"),
-            }
-            def _badge_html(match_type: str, confidence: float) -> str:
-                fg, bg = _BADGE_COLORS.get(match_type, _BADGE_COLORS["UNKNOWN"])
-                label = {
-                    "EXACT_RAMA":  "🔴 Exact RAMA",
-                    "FUZZY_RAMA":  "🟡 Fuzzy RAMA",
-                    "FUZZY_NAME":  "🔵 Fuzzy Name",
-                    "MULTI_MATCH": "🟣 Multi-Match",
-                }.get(match_type, match_type)
-                return (
-                    f'<span style="background:{bg};border:1px solid {fg};border-radius:5px;'
-                    f'padding:2px 8px;font-size:10px;font-family:monospace;color:{fg}'
-                    f';margin-right:4px">{label}</span>'
-                    f'<span style="font-size:10px;color:#64748b">{confidence:.0%} confidence</span>'
-                )
-
-            # ── KPI strip ─────────────────────────────────────────────────────
-            _fq1, _fq2, _fq3, _fq4 = st.columns(4)
-            _n_exact  = sum(1 for g in fuzzy_repeat_groups if "EXACT_RAMA"  in g["match_types"])
-            _n_frama  = sum(1 for g in fuzzy_repeat_groups if "FUZZY_RAMA"  in g["match_types"])
-            _n_fname  = sum(1 for g in fuzzy_repeat_groups if "FUZZY_NAME"  in g["match_types"])
-            _n_multi  = sum(1 for g in fuzzy_repeat_groups if "MULTI_MATCH" in g["match_types"])
-            _fq1.metric("Duplicate Groups",    len(fuzzy_repeat_groups))
-            _fq2.metric("Exact RAMA Clash",    _n_exact,
-                        delta="⚠ possible ID reuse" if _n_exact else None,
-                        delta_color="inverse" if _n_exact else "normal")
-            _fq3.metric("Fuzzy RAMA / Name",   _n_frama + _n_fname)
-            _fq4.metric("Multi-Signal (both)", _n_multi,
-                        delta="⚠ high-confidence dup" if _n_multi else None,
-                        delta_color="inverse" if _n_multi else "normal")
-
-            # ── Filter controls ───────────────────────────────────────────────
-            _fz_c1, _fz_c2, _fz_c3 = st.columns([3, 2, 1])
-            with _fz_c1:
-                _fz_srch = st.text_input(
-                    "🔍 Filter by name or RAMA",
-                    key="fz_search",
-                    placeholder="Patient name, RAMA number…",
-                )
-            with _fz_c2:
-                _fz_type = st.multiselect(
-                    "Match type",
-                    ["EXACT_RAMA", "FUZZY_RAMA", "FUZZY_NAME", "MULTI_MATCH"],
-                    default=[],
-                    key="fz_type",
-                    placeholder="All types",
-                )
-            with _fz_c3:
-                _fz_min_conf = st.slider(
-                    "Min confidence", 0.50, 1.00, 0.80, 0.01, key="fz_conf",
-                )
-
-            # ── Apply filters ─────────────────────────────────────────────────
-            _fz_groups = fuzzy_repeat_groups
-            if _fz_srch:
-                _fz_groups = [
-                    g for g in _fz_groups
-                    if _fz_srch.lower() in g["canonical_name"].lower()
-                    or _fz_srch.lower() in g["canonical_id"].lower()
-                    or any(
-                        _fz_srch.lower() in m["patient_name"].lower()
-                        or _fz_srch.lower() in m["patient_id"].lower()
-                        for m in g["members"]
-                    )
-                ]
-            if _fz_type:
-                _fz_groups = [
-                    g for g in _fz_groups
-                    if g["match_types"] & set(_fz_type)
-                ]
-            _fz_groups = [g for g in _fz_groups if g["confidence"] >= _fz_min_conf]
-
-            st.caption(
-                f"{len(_fz_groups):,} duplicate group(s) shown · "
-                f"🔴 Exact RAMA: {_n_exact} · 🟡 Fuzzy RAMA: {_n_frama} · "
-                f"🔵 Fuzzy Name: {_n_fname} · 🟣 Multi: {_n_multi}"
-            )
-
-            # ── Render each group as a card ───────────────────────────────────
-            for _gi, _grp in enumerate(_fz_groups[:200]):
-                _mts = _grp["match_types"]
-                # Card border colour priority: MULTI > EXACT > FUZZY_RAMA > NAME
-                _card_col = (
-                    "#a78bfa" if "MULTI_MATCH" in _mts
-                    else "#ef4444" if "EXACT_RAMA" in _mts
-                    else "#f59e0b" if "FUZZY_RAMA" in _mts
-                    else "#0ea5e9"
-                )
-
-                # Top badge line
-                _badges = " ".join(
-                    _badge_html(mt, _grp["confidence"])
-                    for mt in sorted(_mts)
-                )
-
-                # Members table HTML
-                _rows_html = ""
-                for _m in _grp["members"]:
-                    _mfg, _mbg = _BADGE_COLORS.get(_m["match_type"], _BADGE_COLORS["UNKNOWN"])
-                    _rows_html += (
-                        f'<tr style="border-bottom:1px solid #1e2a38">'
-                        f'<td style="padding:5px 8px;font-family:monospace;font-size:11px;color:#e2e8f0">'
-                        f'{_m["patient_name"] or "—"}</td>'
-                        f'<td style="padding:5px 8px;font-family:monospace;font-size:11px;color:#94a3b8">'
-                        f'{_m["patient_id"] or "—"}</td>'
-                        f'<td style="padding:5px 8px;text-align:center;font-size:11px;color:#e2e8f0">'
-                        f'{_m["visits"]}</td>'
-                        f'<td style="padding:5px 8px">'
-                        f'<span style="background:{_mbg};border:1px solid {_mfg};border-radius:4px;'
-                        f'padding:1px 6px;font-size:9px;color:{_mfg};font-family:monospace">'
-                        f'{_m["match_type"]}</span></td>'
-                        f'<td style="padding:5px 8px;text-align:center;font-size:11px;color:{_mfg}">'
-                        f'{_m["confidence"]:.0%}</td>'
-                        f'</tr>'
-                    )
-
-                st.markdown(f"""
-<div style='background:#111720;border:1px solid #1e2a38;border-left:4px solid {_card_col};
-     border-radius:10px;padding:14px 16px;margin-bottom:14px'>
-  <div style='display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px'>
-    <div>
-      <span style='font-size:13px;font-weight:700;color:#e2e8f0'>
-        {_grp['canonical_name'] or '(unknown name)'}
-      </span>
-      <span style='font-family:monospace;font-size:10px;color:#64748b;margin-left:10px'>
-        ID: {_grp['canonical_id'] or '—'}
-      </span>
-    </div>
-    <div style='text-align:right'>
-      <span style='font-size:18px;font-weight:800;color:{_card_col};font-family:Syne,sans-serif'>
-        {len(_grp['members'])}
-      </span>
-      <span style='font-size:10px;color:#64748b'> records · </span>
-      <span style='font-size:12px;color:#64748b'>{_grp['total_visits']} total visits</span>
-    </div>
-  </div>
-  <div style='margin-bottom:10px'>{_badges}</div>
-  <table style='width:100%;border-collapse:collapse'>
-    <thead>
-      <tr style='border-bottom:1px solid #1e2a38'>
-        <th style='padding:4px 8px;text-align:left;font-size:10px;color:#64748b;
-             font-family:monospace;font-weight:600'>PATIENT NAME</th>
-        <th style='padding:4px 8px;text-align:left;font-size:10px;color:#64748b;
-             font-family:monospace;font-weight:600'>RAMA / ID</th>
-        <th style='padding:4px 8px;text-align:center;font-size:10px;color:#64748b;
-             font-family:monospace;font-weight:600'>VISITS</th>
-        <th style='padding:4px 8px;text-align:left;font-size:10px;color:#64748b;
-             font-family:monospace;font-weight:600'>MATCH TYPE</th>
-        <th style='padding:4px 8px;text-align:center;font-size:10px;color:#64748b;
-             font-family:monospace;font-weight:600'>CONF</th>
-      </tr>
-    </thead>
-    <tbody>{_rows_html}</tbody>
-  </table>
-</div>""", unsafe_allow_html=True)
-
-            if len(_fz_groups) == 0:
-                st.info("No groups match the current filters.")
-
-            # Download fuzzy report
-            if fuzzy_repeat_groups:
-                _fz_rows = []
-                for _g in fuzzy_repeat_groups:
-                    for _m in _g["members"]:
-                        _fz_rows.append({
-                            "canonical_name":  _g["canonical_name"],
-                            "canonical_id":    _g["canonical_id"],
-                            "patient_name":    _m["patient_name"],
-                            "patient_id":      _m["patient_id"],
-                            "visits":          _m["visits"],
-                            "match_type":      _m["match_type"],
-                            "confidence":      _m["confidence"],
-                            "group_match_types": "|".join(sorted(_g["match_types"])),
-                            "group_confidence":  _g["confidence"],
-                            "total_visits":    _g["total_visits"],
-                        })
-                _fz_dl = pd.DataFrame(_fz_rows).to_csv(index=False).encode()
-                st.download_button(
-                    "⬇️ Download fuzzy duplicate report",
-                    data=_fz_dl,
-                    file_name="pharmascan_fuzzy_duplicates.csv",
-                    mime="text/csv",
-                    key="dl_fuzzy",
-                )
-
-    # ────────────────────────────────────────────────────────────────────────
-    # SECTION C — Rapid Revisits
+    # SECTION B — Rapid Revisits
     # ────────────────────────────────────────────────────────────────────────
     else:
         if not rapid:
@@ -3027,12 +2845,9 @@ with tab_repeat:
                         delta_color="inverse" if _critical else "normal")
             _avg_d = sum(r["days_apart"] for r in rapid) / len(rapid)
             _rv3.metric("Avg Days Apart",        f"{_avg_d:.1f}")
-            _same_doc = sum(
-                1 for r in rapid
-                if r.get("doctor","—") not in ("—","")
-                and len({r["doctor"]}) == 1
-            )
-            _rv4.metric("Rapid revisit window",  f"≤{rapid_days} days")
+            _unique_pts = len({r["patient_id"] for r in rapid})
+            _rv4.metric("Unique Patients",       _unique_pts,
+                        delta=f"≤{rapid_days}-day window")
 
             # Histogram
             _fig_rh = rapid_histogram(rapid)
@@ -3131,8 +2946,11 @@ with tab_network:
   else:
 
     # All text / categorical columns available for network nodes
-    cat_cols = [c for c in df.columns
-                if df[c].dtype == object or str(df[c].dtype).startswith("string")]
+    # Handles both NumPy object and PyArrow string/large_string dtypes.
+    def _is_cat(col):
+        d = str(df[col].dtype)
+        return d == "object" or "string" in d or "large_string" in d
+    cat_cols = [c for c in df.columns if _is_cat(c)]
     if not cat_cols:
         cat_cols = list(df.columns)
 
@@ -3499,96 +3317,22 @@ with tab_xfac:
     ph_work["_doc"]   = ph_work[doc_c].fillna("").astype(str)              if doc_c else ""
     ph_work["_dpt"]   = ph_work[dpt_c].fillna("").astype(str)              if dpt_c else ""
 
-    def _tok(a, b):
-        ta = set(str(a).upper().split()); tb = set(str(b).upper().split())
-        return len(ta & tb) / len(ta | tb) if ta and tb else 0.0
-
     # ── Core matching ─────────────────────────────────────────────────────────
-    # For each pharmacy row, find best facility match by RAMA + name + date
-    results = []
-    for ph_idx, (_, pr) in enumerate(ph_work.iterrows()):
-        rama     = pr["_rama"]
-        ph_date  = pr["_date"]
-        ph_name  = pr["_name"]
-
-        fac_rows = fac_df[fac_df["_rama"] == rama]
-
-        if fac_rows.empty:
-            # NO facility record for this RAMA at all
-            results.append({
-                "_ph_idx": ph_idx,
-                "status": "NO_RECORD",
-                "ph_voucher": pr["_vou"],
-                "ph_patient": ph_name,
-                "ph_rama":    rama,
-                "ph_date":    ph_date,
-                "ph_ins":     pr["_ins"],
-                "ph_total":   pr["_tot"],
-                "ph_doctor":  pr["_doc"],
-                "ph_dept":    pr["_dpt"],
-                "fac_voucher": None, "fac_name": None,
-                "fac_date":    None, "fac_source": None,
-                "days_apart":  None, "name_score": None,
-            })
-            continue
-
-        # RAMA exists — check name + date
-        best = None; best_delta = 9999; best_score = 0
-        for _, fr in fac_rows.iterrows():
-            fac_date = fr["_date"]
-            nscore   = _tok(ph_name, fr["_name"])
-            delta    = abs((ph_date - fac_date).days) if pd.notna(ph_date) and pd.notna(fac_date) else 9999
-            name_ok  = (nscore >= name_thresh) if require_name else True
-            if name_ok and delta <= date_window:
-                if delta < best_delta or (delta == best_delta and nscore > best_score):
-                    best_delta = delta; best_score = nscore; best = fr
-
-        if best is not None:
-            # MATCHED — legitimate dispensing with traced visit
-            results.append({
-                "_ph_idx":     ph_idx,
-                "status":      "MATCHED",
-                "ph_voucher":  pr["_vou"],   "ph_patient": ph_name,
-                "ph_rama":     rama,          "ph_date":    ph_date,
-                "ph_ins":      pr["_ins"],    "ph_total":   pr["_tot"],
-                "ph_doctor":   pr["_doc"],    "ph_dept":    pr["_dpt"],
-                "fac_voucher": best["voucher_id"], "fac_name": best["_name"],
-                "fac_date":    best["_date"],      "fac_source": best["_source"],
-                "days_apart":  best_delta,    "name_score": round(best_score, 2),
-            })
-        else:
-            # RAMA EXISTS but date/name mismatch — partial flag
-            fac_dates = fac_rows["_date"].dropna()
-            nearest_d = None
-            if not fac_dates.empty and pd.notna(ph_date):
-                deltas = (fac_dates - ph_date).abs()
-                nearest_d = int(deltas.min().days)
-            best_fr = fac_rows.iloc[0]
-            results.append({
-                "_ph_idx":     ph_idx,
-                "status":      "UNLINKED",
-                "ph_voucher":  pr["_vou"],   "ph_patient": ph_name,
-                "ph_rama":     rama,          "ph_date":    ph_date,
-                "ph_ins":      pr["_ins"],    "ph_total":   pr["_tot"],
-                "ph_doctor":   pr["_doc"],    "ph_dept":    pr["_dpt"],
-                "fac_voucher": best_fr["voucher_id"], "fac_name": best_fr["_name"],
-                "fac_date":    best_fr["_date"],      "fac_source": best_fr["_source"],
-                "days_apart":  nearest_d,     "name_score": round(_tok(ph_name, best_fr["_name"]),2),
-            })
-
-    _match_cols = ["_ph_idx", "status", "fac_voucher", "fac_name",
-                   "fac_date", "fac_source", "days_apart", "name_score"]
-    _res_match  = pd.DataFrame(results)[_match_cols].set_index("_ph_idx")
-    res_df = ph_work.reset_index(drop=True).join(_res_match, how="left")
+    res_df = run_match(
+        ph_work, fac_df,
+        name_thresh=name_thresh,
+        date_window=date_window,
+        require_name=require_name,
+    )
 
     no_rec    = res_df[res_df["status"]=="NO_RECORD"]
     unlinked  = res_df[res_df["status"]=="UNLINKED"]
     matched   = res_df[res_df["status"]=="MATCHED"]
 
-    total_ins       = res_df["_ins"].sum()
-    no_rec_ins      = no_rec["_ins"].sum()
-    unlinked_ins    = unlinked["_ins"].sum()
-    matched_ins     = matched["_ins"].sum()
+    total_ins       = res_df["ph_ins"].sum()
+    no_rec_ins      = no_rec["ph_ins"].sum()
+    unlinked_ins    = unlinked["ph_ins"].sum()
+    matched_ins     = matched["ph_ins"].sum()
     at_risk_ins     = no_rec_ins + unlinked_ins
     fac_count       = fac_df["_source"].nunique()
     coverage_pct    = 100 * matched_ins / total_ins if total_ins else 0
@@ -3659,136 +3403,220 @@ with tab_xfac:
 
     st.markdown("<hr style='border-color:#1e2a38;margin:4px 0 24px'>", unsafe_allow_html=True)
 
-    # ── Build unified sorted findings frame ───────────────────────────────────
-    _priority = {"NO_RECORD": 0, "UNLINKED": 1, "MATCHED": 2}
-    unified_df = res_df.copy()
-    unified_df["_sort_priority"] = unified_df["status"].map(_priority)
-    unified_df = (unified_df
-        .sort_values(["_sort_priority", "_ins"], ascending=[True, False])
-        .drop(columns=["_sort_priority"])
-        .reset_index(drop=True)
-    )
-
-    # ── ALL FINDINGS (unified table) ──────────────────────────────────────────
+    # ── TABLE 1: No Hospital Record ───────────────────────────────────────────
     st.markdown(f"""
-<div class='fraud-card' style='border-color:#334155;background:#0d1724'>
+<div class='fraud-card fraud-card-red'>
   <div style='display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px'>
     <div>
-      <span style='font-size:16px;font-weight:800;color:#e2e8f0;font-family:Syne,sans-serif'>
-        📋 All Findings — Cross-Facility Match Results
+      <span style='font-size:16px;font-weight:800;color:#f87171;font-family:Syne,sans-serif'>
+        🔴 Table 1 — No Hospital / Clinic Visit Record
       </span>
-      <span class='badge badge-red'   style='margin-left:10px'>🔴 {len(no_rec):,} No Record</span>
-      <span class='badge badge-amber' style='margin-left:6px' >🟡 {len(unlinked):,} Unlinked</span>
-      <span class='badge badge-green' style='margin-left:6px' >✅ {len(matched):,} Verified</span>
+      <span class='badge badge-red' style='margin-left:10px'>{len(no_rec):,} vouchers</span>
+      <span class='badge badge-red' style='margin-left:6px'>RWF {no_rec_ins:,.0f}</span>
     </div>
-    <span style='font-size:11px;color:#64748b;font-family:monospace'>
-      Sorted by risk priority · insurance descending within each group
+    <span style='font-size:11px;color:#991b1b;font-family:monospace'>
+      Patient's RAMA number not found in ANY uploaded facility file
     </span>
   </div>
 </div>""", unsafe_allow_html=True)
 
-    ufc1, ufc2, ufc3, ufc4 = st.columns([2, 1.2, 1.5, 1])
-    with ufc1:
-        uf_srch = st.text_input("🔍 Search",
-            placeholder="Name, RAMA, voucher, doctor, facility…", key="uf_srch")
-    with ufc2:
-        uf_status = st.multiselect("Status",
-            ["NO_RECORD", "UNLINKED", "MATCHED"],
-            default=["NO_RECORD", "UNLINKED", "MATCHED"],
-            key="uf_status")
-    with ufc3:
-        _doc_opts = sorted(unified_df["_doc"].dropna().unique().tolist())
-        uf_doc = st.selectbox("Filter by Prescriber",
-            ["All"] + _doc_opts, key="uf_doc")
-    with ufc4:
-        uf_min = st.number_input("Min insurance (RWF)", 0, value=0, step=5000, key="uf_min")
+    if not no_rec.empty:
+        # Sub-controls
+        t1c1, t1c2, t1c3 = st.columns([2,1.5,1.5])
+        with t1c1:
+            t1_srch = st.text_input("🔍 Search", placeholder="Name, RAMA, voucher, doctor…",
+                                     key="t1_srch")
+        with t1c2:
+            t1_doc = st.selectbox("Filter by Prescriber",
+                ["All"] + sorted(no_rec["ph_doctor"].unique().tolist()),
+                key="t1_doc")
+        with t1c3:
+            t1_min = st.number_input("Min insurance (RWF)", 0, value=0, step=5000, key="t1_min")
 
-    uf_disp = unified_df.copy()
-    if uf_srch:
-        _mask = uf_disp.apply(
-            lambda c: c.astype(str).str.contains(uf_srch, case=False, na=False)
-        ).any(axis=1)
-        uf_disp = uf_disp[_mask]
-    if uf_status:
-        uf_disp = uf_disp[uf_disp["status"].isin(uf_status)]
-    if uf_doc != "All":
-        uf_disp = uf_disp[uf_disp["_doc"] == uf_doc]
-    if uf_min > 0:
-        uf_disp = uf_disp[uf_disp["_ins"] >= uf_min]
+        t1_disp = no_rec.copy()
+        if t1_srch:
+            mask = t1_disp.apply(
+                lambda c: c.astype(str).str.contains(t1_srch, case=False, na=False)
+            ).any(axis=1)
+            t1_disp = t1_disp[mask]
+        if t1_doc != "All":
+            t1_disp = t1_disp[t1_disp["ph_doctor"] == t1_doc]
+        if t1_min > 0:
+            t1_disp = t1_disp[t1_disp["ph_ins"] >= t1_min]
 
-    # Build display copy: drop internal _* helpers, keep original + match columns
-    _helper_drop = [c for c in uf_disp.columns
-                    if c.startswith("_") and c not in ("status",)]
-    uf_show = uf_disp.drop(columns=_helper_drop, errors="ignore").copy()
+        # Build clean display table
+        t1_show = t1_disp[[
+            "ph_voucher","ph_patient","ph_rama","ph_date",
+            "ph_ins","ph_total","ph_doctor","ph_dept"
+        ]].copy()
+        t1_show.columns = [
+            "Pharmacy Voucher","Patient Name","RAMA Number","Dispensing Date",
+            "Insurance Claim (RWF)","Total Cost (RWF)","Prescriber","Specialty"
+        ]
+        t1_show["Dispensing Date"] = pd.to_datetime(
+            t1_show["Dispensing Date"], errors="coerce"
+        ).dt.strftime("%d/%m/%Y").fillna("—")
+        t1_show = t1_show.sort_values("Insurance Claim (RWF)", ascending=False)
+        t1_show.index = range(1, len(t1_show)+1)
 
-    # Move status to first column
-    _other_cols = [c for c in uf_show.columns if c != "status"]
-    uf_show = uf_show[["status"] + _other_cols]
-
-    # Format date columns
-    for _dc in [dt_c, "fac_date"]:
-        if _dc and _dc in uf_show.columns:
-            uf_show[_dc] = pd.to_datetime(uf_show[_dc], errors="coerce"
-                           ).dt.strftime("%d/%m/%Y").fillna("—")
-
-    # Fill facility columns with "—" for NO_RECORD rows (display only)
-    _fac_cols = ["fac_name", "fac_date", "fac_source", "fac_voucher",
-                 "days_apart", "name_score"]
-    _norec_mask = uf_show["status"] == "NO_RECORD"
-    for _fc in _fac_cols:
-        if _fc in uf_show.columns:
-            uf_show.loc[_norec_mask, _fc] = uf_show.loc[_norec_mask, _fc].fillna("—")
-
-    # Clean fac_source into a readable health facility name and rename column
-    if "fac_source" in uf_show.columns:
-        _cleaned = (uf_show["fac_source"]
-            .fillna("")
-            .astype(str)
-            .str.replace(r'\.xlsx?$|\.csv$|\.xls$', '', regex=True, flags=re.IGNORECASE)
-            .str.replace(r'[_\-]+', ' ', regex=True)
-            .str.strip()
-            .str.title()
+        st.markdown(
+            f"<div style='font-size:11px;color:{MUTED};font-family:monospace;margin-bottom:6px'>"
+            f"Showing <b style='color:#f87171'>{len(t1_show):,}</b> vouchers · "
+            f"Insurance at risk: <b style='color:#ef4444'>RWF {t1_disp['ph_ins'].sum():,.0f}</b>"
+            f"</div>", unsafe_allow_html=True
         )
-        # preserve "—" sentinels applied above for NO_RECORD rows
-        uf_show["fac_source"] = _cleaned.where(uf_show["fac_source"] != "—", "—")
-        uf_show = uf_show.rename(columns={"fac_source": "Health Facility"})
+        st.dataframe(t1_show, use_container_width=True, height=340)
 
-    # Emoji status labels
-    _status_label = {"NO_RECORD": "🔴 NO_RECORD", "UNLINKED": "🟡 UNLINKED", "MATCHED": "✅ MATCHED"}
-    uf_show["status"] = uf_show["status"].map(_status_label)
-    uf_show.index = range(1, len(uf_show) + 1)
+        # Prescriber risk breakdown
+        with st.expander("📊 Prescriber risk breakdown (Table 1)", expanded=False):
+            doc_risk = (no_rec.groupby("ph_doctor")["ph_ins"]
+                        .agg(Vouchers="count", Total_Claimed="sum")
+                        .sort_values("Total_Claimed", ascending=False)
+                        .reset_index())
+            doc_risk.columns = ["Prescriber","Vouchers","Total Claimed (RWF)"]
+            st.dataframe(doc_risk, use_container_width=True, height=280)
 
-    # Per-row color styling
-    _STATUS_BG = {"🔴 NO_RECORD": "#FFE4E4", "🟡 UNLINKED": "#FEF3C7", "✅ MATCHED": "#E7F5EC"}
-    _STATUS_FG = {"🔴 NO_RECORD": "#7F1D1D", "🟡 UNLINKED": "#78350F", "✅ MATCHED": "#14532D"}
+        # Download
+        t1_buf = io.BytesIO()
+        _t1_xl = no_rec.copy()
+        _t1_xl["ph_date"] = pd.to_datetime(_t1_xl["ph_date"], errors="coerce").dt.strftime("%d/%m/%Y")
+        with pd.ExcelWriter(t1_buf, engine="openpyxl") as xw:
+            from openpyxl.styles import PatternFill as _PF, Font as _F, Alignment as _Al
+            _t1_xl.to_excel(xw, index=False, sheet_name="No Facility Record")
+            ws = xw.sheets["No Facility Record"]
+            hf = _PF("solid", fgColor="7F1D1D")
+            for cell in ws[1]:
+                cell.fill = hf
+                cell.font = _F(bold=True, color="FFFFFF", name="Arial", size=10)
+                cell.alignment = _Al(horizontal="center", wrap_text=True)
+            for i, r in enumerate(ws.iter_rows(min_row=2), 2):
+                bg = "FFE4E4" if i%2==0 else "FFFFFF"
+                for c in r: c.fill = _PF("solid", fgColor=bg)
+        t1_buf.seek(0)
+        st.download_button("⬇️ Download Table 1", t1_buf.getvalue(),
+            "table1_no_facility_record.xlsx",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="dl_t1")
 
-    def _color_rows(row):
-        bg = _STATUS_BG.get(row["status"], "#FFFFFF")
-        fg = _STATUS_FG.get(row["status"], "#111827")
-        return [f"background-color:{bg};color:{fg}" for _ in row]
+    st.markdown("<hr style='border-color:#1e2a38;margin:28px 0'>", unsafe_allow_html=True)
 
-    _n_norec   = len(uf_disp[uf_disp["status"]=="NO_RECORD"])
-    _n_unlinked = len(uf_disp[uf_disp["status"]=="UNLINKED"])
-    _n_matched  = len(uf_disp[uf_disp["status"]=="MATCHED"])
+    # ── TABLE 2: UNLINKED (RAMA found, visit not linked) ──────────────────────
+    st.markdown(f"""
+<div class='fraud-card fraud-card-amber'>
+  <div style='display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px'>
+    <div>
+      <span style='font-size:16px;font-weight:800;color:#fbbf24;font-family:Syne,sans-serif'>
+        🟡 Table 2 — RAMA Found, Visit Not Linked
+      </span>
+      <span class='badge badge-amber' style='margin-left:10px'>{len(unlinked):,} vouchers</span>
+      <span class='badge badge-amber' style='margin-left:6px'>RWF {unlinked_ins:,.0f}</span>
+    </div>
+    <span style='font-size:11px;color:#92400e;font-family:monospace'>
+      Patient exists in a facility file but dispensing date is outside the ±{date_window}-day window
+    </span>
+  </div>
+</div>""", unsafe_allow_html=True)
 
-    st.markdown(
-        f"<div style='font-size:11px;color:{MUTED};font-family:monospace;margin-bottom:6px'>"
-        f"Showing <b style='color:#e2e8f0'>{len(uf_show):,}</b> findings · "
-        f"🔴 <b style='color:#f87171'>{_n_norec:,}</b> no record · "
-        f"🟡 <b style='color:#fbbf24'>{_n_unlinked:,}</b> unlinked · "
-        f"✅ <b style='color:#4ade80'>{_n_matched:,}</b> verified"
-        f"</div>", unsafe_allow_html=True
-    )
-    st.dataframe(uf_show.style.apply(_color_rows, axis=1),
-                 use_container_width=True, height=500)
+    if not unlinked.empty:
+        t2c1, t2c2 = st.columns([2,1])
+        with t2c1:
+            t2_srch = st.text_input("🔍 Search", placeholder="Name, RAMA…", key="t2_srch")
+        with t2c2:
+            t2_max_gap = st.number_input("Max days apart to show", 1, 365, 60, key="t2_gap")
 
-    with st.expander("📊 Prescriber risk breakdown — all findings", expanded=False):
-        _doc_risk = (res_df.groupby("_doc")["_ins"]
-                     .agg(Vouchers="count", Total_Claimed="sum")
-                     .sort_values("Total_Claimed", ascending=False)
-                     .reset_index())
-        _doc_risk.columns = ["Prescriber", "Vouchers", "Total Claimed (RWF)"]
-        st.dataframe(_doc_risk, use_container_width=True, height=280)
+        t2_disp = unlinked.copy()
+        if t2_srch:
+            mask = t2_disp.apply(
+                lambda c: c.astype(str).str.contains(t2_srch, case=False, na=False)
+            ).any(axis=1)
+            t2_disp = t2_disp[mask]
+        if t2_max_gap:
+            t2_disp = t2_disp[
+                t2_disp["days_apart"].isna() | (t2_disp["days_apart"] <= t2_max_gap)
+            ]
+
+        t2_show = t2_disp[[
+            "ph_voucher","ph_patient","ph_rama","ph_date","ph_ins",
+            "fac_name","fac_date","fac_source","days_apart","name_score"
+        ]].copy()
+        t2_show.columns = [
+            "Pharmacy Voucher","Pharmacy Patient","RAMA","Pharmacy Date","Insurance (RWF)",
+            "Facility Patient","Facility Visit Date","Facility","Days Apart","Name Score"
+        ]
+        for dcol in ["Pharmacy Date","Facility Visit Date"]:
+            t2_show[dcol] = pd.to_datetime(t2_show[dcol], errors="coerce").dt.strftime("%d/%m/%Y").fillna("—")
+        t2_show = t2_show.sort_values("Days Apart", na_position="last")
+        t2_show.index = range(1, len(t2_show)+1)
+
+        st.markdown(
+            f"<div style='font-size:11px;color:{MUTED};font-family:monospace;margin-bottom:6px'>"
+            f"Showing <b style='color:#fbbf24'>{len(t2_show):,}</b> vouchers · "
+            f"Insurance: <b style='color:#f59e0b'>RWF {t2_disp['ph_ins'].sum():,.0f}</b>"
+            f"</div>", unsafe_allow_html=True
+        )
+        st.dataframe(t2_show, use_container_width=True, height=300)
+
+        t2_buf = io.BytesIO()
+        _t2_xl = t2_disp.copy()
+        _t2_xl["ph_date"]  = pd.to_datetime(_t2_xl["ph_date"],  errors="coerce").dt.strftime("%d/%m/%Y")
+        _t2_xl["fac_date"] = pd.to_datetime(_t2_xl["fac_date"], errors="coerce").dt.strftime("%d/%m/%Y")
+        with pd.ExcelWriter(t2_buf, engine="openpyxl") as xw:
+            from openpyxl.styles import PatternFill as _PF, Font as _F, Alignment as _Al
+            _t2_xl.to_excel(xw, index=False, sheet_name="Unlinked Visits")
+            ws = xw.sheets["Unlinked Visits"]
+            for cell in ws[1]:
+                cell.fill = _PF("solid", fgColor="78350F")
+                cell.font = _F(bold=True, color="FFFFFF", name="Arial", size=10)
+                cell.alignment = _Al(horizontal="center", wrap_text=True)
+            for i, r in enumerate(ws.iter_rows(min_row=2), 2):
+                bg = "FEF3C7" if i%2==0 else "FFFFFF"
+                for c in r: c.fill = _PF("solid", fgColor=bg)
+        t2_buf.seek(0)
+        st.download_button("⬇️ Download Table 2", t2_buf.getvalue(),
+            "table2_unlinked_visits.xlsx",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="dl_t2")
+
+    st.markdown("<hr style='border-color:#1e2a38;margin:28px 0'>", unsafe_allow_html=True)
+
+    # ── TABLE 3: MATCHED (verified, informational) ────────────────────────────
+    st.markdown(f"""
+<div class='fraud-card fraud-card-green'>
+  <div style='display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px'>
+    <div>
+      <span style='font-size:16px;font-weight:800;color:#4ade80;font-family:Syne,sans-serif'>
+        ✅ Table 3 — Verified: Hospital Visit + Pharmacy Dispensing Linked
+      </span>
+      <span class='badge badge-green' style='margin-left:10px'>{len(matched):,} vouchers</span>
+      <span class='badge badge-green' style='margin-left:6px'>RWF {matched_ins:,.0f}</span>
+    </div>
+    <span style='font-size:11px;color:#14532d;font-family:monospace'>
+      Legitimate patient journey confirmed — clinic visit → pharmacy dispensing
+    </span>
+  </div>
+</div>""", unsafe_allow_html=True)
+
+    with st.expander("View verified records (Table 3)", expanded=False):
+        t3_search = st.text_input("🔍 Search verified records", key="t3_srch")
+        t3_show = matched[[
+            "ph_voucher","ph_patient","ph_rama","ph_date","ph_ins",
+            "fac_voucher","fac_name","fac_date","fac_source","days_apart","name_score","confidence"
+        ]].copy()
+        t3_show.columns = [
+            "Pharmacy Voucher","Pharmacy Patient","RAMA","Pharmacy Date","Insurance (RWF)",
+            "Facility Voucher","Facility Patient","Facility Date","Facility",
+            "Days Apart","Name Score","Match Quality"
+        ]
+        for dcol in ["Pharmacy Date","Facility Date"]:
+            t3_show[dcol] = pd.to_datetime(t3_show[dcol], errors="coerce").dt.strftime("%d/%m/%Y").fillna("—")
+        if t3_search:
+            mask = t3_show.apply(
+                lambda c: c.astype(str).str.contains(t3_search, case=False, na=False)
+            ).any(axis=1)
+            t3_show = t3_show[mask]
+        t3_show = t3_show.sort_values("Days Apart").reset_index(drop=True)
+        t3_show.index = t3_show.index + 1
+        st.dataframe(t3_show, use_container_width=True, height=300)
 
     st.markdown("<hr style='border-color:#1e2a38;margin:28px 0'>", unsafe_allow_html=True)
 
@@ -3796,7 +3624,7 @@ with tab_xfac:
     st.markdown('<div class="sec-head">⬇️ Download Full Fraud Detection Report</div>',
                 unsafe_allow_html=True)
 
-    if st.button("📊 Generate Full Report (2 sheets)", type="primary", key="fd_gen"):
+    if st.button("📊 Generate Full Report (4 sheets)", type="primary", key="fd_gen"):
         from openpyxl import Workbook as _WB
         from openpyxl.styles import (PatternFill as _PF, Font as _F,
                                      Alignment as _Al, Border as _B, Side as _S)
@@ -3806,15 +3634,7 @@ with tab_xfac:
         THIN = _S(border_style="thin", color="CCCCCC")
         BDR  = _B(left=THIN,right=THIN,top=THIN,bottom=THIN)
 
-        def _fmt_date(s):
-            return pd.to_datetime(s, errors="coerce").dt.strftime("%d/%m/%Y").fillna("")
-
-        def _make_sheet_colored(wb, title, data_df, hdr_color):
-            _ROW_COLORS = {
-                "NO_RECORD": "FFE4E4",
-                "UNLINKED":  "FEF3C7",
-                "MATCHED":   "E7F5EC",
-            }
+        def _make_sheet(wb, title, data_df, hdr_color, row_colors):
             ws = wb.create_sheet(title)
             for ci, col in enumerate(data_df.columns, 1):
                 c = ws.cell(1, ci, col)
@@ -3826,13 +3646,9 @@ with tab_xfac:
             ws.row_dimensions[1].height = 30
             ws.freeze_panes = "A2"
             for ri, (_, row) in enumerate(data_df.iterrows(), 2):
-                row_status = str(row.get("status", ""))
-                bg = _ROW_COLORS.get(row_status, "FFFFFF")
+                bg = row_colors[ri % len(row_colors)]
                 for ci, val in enumerate(row, 1):
-                    try:
-                        v = "" if pd.isna(val) else val
-                    except (TypeError, ValueError):
-                        v = val
+                    v = "" if (isinstance(val, float) and math.isnan(val)) else val
                     c = ws.cell(ri, ci, v)
                     c.font = _F(name="Arial", size=10)
                     c.fill = _PF("solid", fgColor=bg)
@@ -3876,34 +3692,27 @@ with tab_xfac:
         ws0.column_dimensions["A"].width = 38
         ws0.column_dimensions["B"].width = 22
 
-        # Sheet 1: All Findings (all original pharmacy columns + match columns, color-coded by status)
-        all_xl = unified_df.drop(
-            columns=[c for c in unified_df.columns if c.startswith("_")],
-            errors="ignore"
-        ).copy()
-        # Move status to first column
-        _xl_other = [c for c in all_xl.columns if c != "status"]
-        all_xl = all_xl[["status"] + _xl_other]
-        # Format date columns
-        for _dc in [dt_c, "fac_date"]:
-            if _dc and _dc in all_xl.columns:
-                all_xl[_dc] = _fmt_date(all_xl[_dc])
-        # Clean fac_source into a readable health facility name
-        if "fac_source" in all_xl.columns:
-            all_xl["fac_source"] = (all_xl["fac_source"]
-                .fillna("")
-                .astype(str)
-                .str.replace(r'\.xlsx?$|\.csv$|\.xls$', '', regex=True, flags=re.IGNORECASE)
-                .str.replace(r'[_\-]+', ' ', regex=True)
-                .str.strip()
-                .str.title()
-            )
-            all_xl = all_xl.rename(columns={"fac_source": "Health Facility"})
-        # Convert nullable numeric columns to plain Python-compatible types
-        for _nc in ["days_apart", "name_score"]:
-            if _nc in all_xl.columns:
-                all_xl[_nc] = pd.to_numeric(all_xl[_nc], errors="coerce")
-        _make_sheet_colored(wb, "All Findings", all_xl, "1E3A5F")
+        # Sheet 1: No record
+        def _fmt_date(s):
+            return pd.to_datetime(s, errors="coerce").dt.strftime("%d/%m/%Y").fillna("")
+        t1_xl = no_rec[["ph_voucher","ph_patient","ph_rama","ph_date","ph_ins","ph_total","ph_doctor","ph_dept"]].copy()
+        t1_xl.columns = ["Voucher","Patient Name","RAMA Number","Dispensing Date","Insurance (RWF)","Total Cost (RWF)","Prescriber","Specialty"]
+        t1_xl["Dispensing Date"] = _fmt_date(t1_xl["Dispensing Date"])
+        _make_sheet(wb, "1 - No Facility Record", t1_xl, "7F1D1D", ["FFE4E4","FFFFFF"])
+
+        # Sheet 2: Unlinked
+        t2_xl = unlinked[["ph_voucher","ph_patient","ph_rama","ph_date","ph_ins","fac_name","fac_date","fac_source","days_apart","name_score"]].copy()
+        t2_xl.columns = ["Voucher","Patient Name","RAMA","Pharmacy Date","Insurance (RWF)","Facility Patient","Facility Date","Facility","Days Apart","Name Score"]
+        t2_xl["Pharmacy Date"] = _fmt_date(t2_xl["Pharmacy Date"])
+        t2_xl["Facility Date"] = _fmt_date(t2_xl["Facility Date"])
+        _make_sheet(wb, "2 - Unlinked Visits", t2_xl, "78350F", ["FEF3C7","FFFFFF"])
+
+        # Sheet 3: Verified
+        t3_xl = matched[["ph_voucher","ph_patient","ph_rama","ph_date","ph_ins","fac_voucher","fac_name","fac_date","fac_source","days_apart","name_score"]].copy()
+        t3_xl.columns = ["Voucher","Patient Name","RAMA","Pharmacy Date","Insurance (RWF)","Facility Voucher","Facility Patient","Facility Date","Facility","Days Apart","Name Score"]
+        t3_xl["Pharmacy Date"] = _fmt_date(t3_xl["Pharmacy Date"])
+        t3_xl["Facility Date"] = _fmt_date(t3_xl["Facility Date"])
+        _make_sheet(wb, "3 - Verified", t3_xl, "14532D", ["E7F5EC","FFFFFF"])
 
         buf = io.BytesIO(); wb.save(buf); buf.seek(0)
         st.success("✅ Full report ready!")
@@ -4476,7 +4285,7 @@ with tab_dataprep:
                 return ""
 
         st.dataframe(
-            _qual_df.style.applymap(_color_fill, subset=["Fill %"]),
+            _qual_df.style.map(_color_fill, subset=["Fill %"]),
             use_container_width=True, height=280,
         )
 
@@ -5047,25 +4856,24 @@ with tab_dataprep:
                 try:
                     # Serialise the clean df to CSV bytes and reparse (ensures consistent types)
                     _lake_bytes = _final_df.to_csv(index=False).encode()
-                    _lake_df, _lake_colmap, _lake_s, _lake_rg, _lake_rd, _lake_rapid, _lake_frg = \
+                    _lake_df, _lake_colmap, _lake_s, _lake_rg, _lake_rd, _lake_rapid = \
                         load_and_process(_lake_bytes, "lake_data.csv", _final_rapid)
 
                     from datetime import datetime as _dt
                     st.session_state["data_lake"] = {
-                        "committed":           True,
-                        "df":                  _lake_df,
-                        "stats":               _lake_s,
-                        "rapid":               _lake_rapid,
-                        "rapid_days":          _final_rapid,
-                        "repeat_groups":       _lake_rg,
-                        "repeat_detail":       _lake_rd,
-                        "fuzzy_repeat_groups": _lake_frg,
-                        "col_map":             _lake_colmap,
-                        "top_n":               _final_top_n,
-                        "filename":            _raw_fname,
-                        "mapped_fields":       list(_confirmed_map.keys()),
-                        "committed_at":        _dt.now().strftime("%d/%m/%Y %H:%M"),
-                        "source_rows":         len(_final_df),
+                        "committed":      True,
+                        "df":             _lake_df,
+                        "stats":          _lake_s,
+                        "rapid":          _lake_rapid,
+                        "rapid_days":     _final_rapid,
+                        "repeat_groups":  _lake_rg,
+                        "repeat_detail":  _lake_rd,
+                        "col_map":        _lake_colmap,
+                        "top_n":          _final_top_n,
+                        "filename":       _raw_fname,
+                        "mapped_fields":  list(_confirmed_map.keys()),
+                        "committed_at":   _dt.now().strftime("%d/%m/%Y %H:%M"),
+                        "source_rows":    len(_final_df),
                     }
                     st.success(
                         f"✅ Data lake committed! "
