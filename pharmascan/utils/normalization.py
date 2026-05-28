@@ -33,7 +33,10 @@ def fmt_number(n: Union[int, float]) -> str:
 
 def _toks(name: str) -> set:
     """Lowercase alpha-numeric tokens from a name string."""
-    return set(re.sub(r"[^a-z0-9 ]", "", name.lower()).split())
+    # Replace hyphens and underscores with spaces so that hyphenated names
+    # like "Jean-Pierre" tokenize as {"jean", "pierre"} rather than {"jeanpierre"}.
+    s = re.sub(r"[-_]", " ", name.lower())
+    return set(re.sub(r"[^a-z0-9 ]", "", s).split())
 
 
 def _seq_ratio(a: str, b: str) -> float:

@@ -3,6 +3,10 @@
 from pharmascan.processors.counter_verification import (
     generate_counter_verification_xlsx,
 )
+from pharmascan.processors.cross_facility_matcher import (
+    normalize_rama,
+    run_match,
+)
 from pharmascan.processors.data_loader import (
     calculate_summary_stats,
     detect_rapid_revisits,
@@ -28,6 +32,8 @@ from pharmascan.processors.rules_engine import (
 )
 
 __all__ = [
+    "normalize_rama",
+    "run_match",
     "load_data",
     "normalize_column_names",
     "parse_dates",

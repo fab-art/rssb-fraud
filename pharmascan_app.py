@@ -3177,81 +3177,14 @@ with tab_xfac:
     ph_work["_doc"]   = ph_work[doc_c].fillna("").astype(str)              if doc_c else ""
     ph_work["_dpt"]   = ph_work[dpt_c].fillna("").astype(str)              if dpt_c else ""
 
-    def _tok(a, b):
-        ta = set(str(a).upper().split()); tb = set(str(b).upper().split())
-        return len(ta & tb) / len(ta | tb) if ta and tb else 0.0
-
     # ── Core matching ─────────────────────────────────────────────────────────
-    # For each pharmacy row, find best facility match by RAMA + name + date
-    results = []
-    for _, pr in ph_work.iterrows():
-        rama     = pr["_rama"]
-        ph_date  = pr["_date"]
-        ph_name  = pr["_name"]
-
-        fac_rows = fac_df[fac_df["_rama"] == rama]
-
-        if fac_rows.empty:
-            # NO facility record for this RAMA at all
-            results.append({
-                "status": "NO_RECORD",
-                "ph_voucher": pr["_vou"],
-                "ph_patient": ph_name,
-                "ph_rama":    rama,
-                "ph_date":    ph_date,
-                "ph_ins":     pr["_ins"],
-                "ph_total":   pr["_tot"],
-                "ph_doctor":  pr["_doc"],
-                "ph_dept":    pr["_dpt"],
-                "fac_voucher": None, "fac_name": None,
-                "fac_date":    None, "fac_source": None,
-                "days_apart":  None, "name_score": None,
-            })
-            continue
-
-        # RAMA exists — check name + date
-        best = None; best_delta = 9999; best_score = 0
-        for _, fr in fac_rows.iterrows():
-            fac_date = fr["_date"]
-            nscore   = _tok(ph_name, fr["_name"])
-            delta    = abs((ph_date - fac_date).days) if pd.notna(ph_date) and pd.notna(fac_date) else 9999
-            name_ok  = (nscore >= name_thresh) if require_name else True
-            if name_ok and delta <= date_window:
-                if delta < best_delta or (delta == best_delta and nscore > best_score):
-                    best_delta = delta; best_score = nscore; best = fr
-
-        if best is not None:
-            # MATCHED — legitimate dispensing with traced visit
-            results.append({
-                "status":      "MATCHED",
-                "ph_voucher":  pr["_vou"],   "ph_patient": ph_name,
-                "ph_rama":     rama,          "ph_date":    ph_date,
-                "ph_ins":      pr["_ins"],    "ph_total":   pr["_tot"],
-                "ph_doctor":   pr["_doc"],    "ph_dept":    pr["_dpt"],
-                "fac_voucher": best["voucher_id"], "fac_name": best["_name"],
-                "fac_date":    best["_date"],      "fac_source": best["_source"],
-                "days_apart":  best_delta,    "name_score": round(best_score, 2),
-            })
-        else:
-            # RAMA EXISTS but date/name mismatch — partial flag
-            fac_dates = fac_rows["_date"].dropna()
-            nearest_d = None
-            if not fac_dates.empty and pd.notna(ph_date):
-                deltas = (fac_dates - ph_date).abs()
-                nearest_d = int(deltas.min().days)
-            best_fr = fac_rows.iloc[0]
-            results.append({
-                "status":      "UNLINKED",
-                "ph_voucher":  pr["_vou"],   "ph_patient": ph_name,
-                "ph_rama":     rama,          "ph_date":    ph_date,
-                "ph_ins":      pr["_ins"],    "ph_total":   pr["_tot"],
-                "ph_doctor":   pr["_doc"],    "ph_dept":    pr["_dpt"],
-                "fac_voucher": best_fr["voucher_id"], "fac_name": best_fr["_name"],
-                "fac_date":    best_fr["_date"],      "fac_source": best_fr["_source"],
-                "days_apart":  nearest_d,     "name_score": round(_tok(ph_name, best_fr["_name"]),2),
-            })
-
-    res_df = pd.DataFrame(results)
+    from pharmascan.processors.cross_facility_matcher import run_match
+    res_df = run_match(
+        ph_work, fac_df,
+        name_thresh=name_thresh,
+        date_window=date_window,
+        require_name=require_name,
+    )
 
     no_rec    = res_df[res_df["status"]=="NO_RECORD"]
     unlinked  = res_df[res_df["status"]=="UNLINKED"]
@@ -3528,11 +3461,12 @@ with tab_xfac:
         t3_search = st.text_input("🔍 Search verified records", key="t3_srch")
         t3_show = matched[[
             "ph_voucher","ph_patient","ph_rama","ph_date","ph_ins",
-            "fac_voucher","fac_name","fac_date","fac_source","days_apart","name_score"
+            "fac_voucher","fac_name","fac_date","fac_source","days_apart","name_score","confidence"
         ]].copy()
         t3_show.columns = [
             "Pharmacy Voucher","Pharmacy Patient","RAMA","Pharmacy Date","Insurance (RWF)",
-            "Facility Voucher","Facility Patient","Facility Date","Facility","Days Apart","Name Score"
+            "Facility Voucher","Facility Patient","Facility Date","Facility",
+            "Days Apart","Name Score","Match Quality"
         ]
         for dcol in ["Pharmacy Date","Facility Date"]:
             t3_show[dcol] = pd.to_datetime(t3_show[dcol], errors="coerce").dt.strftime("%d/%m/%Y").fillna("—")
