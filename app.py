@@ -13,6 +13,7 @@ import io
 import re
 import warnings
 from collections import defaultdict as _dd
+from rapidfuzz import fuzz
 
 import matplotlib
 matplotlib.use("Agg")
@@ -214,6 +215,8 @@ COLUMN_MAP = {
     r"patient.?co.?payment":                            "patient_copay",
     r"insurance.?co.?payment":                          "insurance_copay",
     r"medicine.?cost":                                  "medicine_cost",
+    r"affiliate.?name":                                 "affiliate_name",
+    r"department":                                      "department",
     # ── Generic fallbacks ─────────────────────────────────────────────────────
     r"patient.?(id|no|num|number|code)?":               "patient_id",
     r"pat.?id|pid":                                     "patient_id",
@@ -934,29 +937,26 @@ def _tok_fuzzy_subset(a: str, b: str, thresh: float = 0.76) -> bool:
 def _match_score(a: str, b: str):
     """
     Returns (score 0–1, reason str).
-    reason ∈ {'subset', 'typo', 'none'}
+    Uses RapidFuzz Token Sort Ratio as specified in SDD.
     """
-    ta, tb = _toks(a), _toks(b)
-    if not ta or not tb:
+    na = normalize_name(a)
+    nb = normalize_name(b)
+    if not na or not nb:
         return 0.0, "none"
 
-    shorter, longer = (ta, tb) if len(ta) <= len(tb) else (tb, ta)
+    # SDD specifies RapidFuzz Token Sort Ratio
+    ratio = fuzz.token_sort_ratio(na, nb) / 100.0
 
-    # Rule 1 — exact token subset ('ZACHEE' ⊂ 'Niyonsenga Zachee')
-    if shorter <= longer:
-        boost = min(0.12, len(shorter) * 0.04)
-        return 0.88 + boost, "subset"
+    if ratio >= 0.95:
+        return ratio, "exact"
+    if ratio >= 0.85:
+        return ratio, "high"
+    if ratio >= 0.70:
+        return ratio, "probable"
+    if ratio >= 0.50:
+        return ratio, "review"
 
-    # Rule 2 — fuzzy-token subset: every short token ≈ some long token
-    if _tok_fuzzy_subset(a, b):
-        return 0.85, "typo"
-
-    # Rule 3 — high overall char-sequence similarity
-    ratio = _seq_ratio(a, b)
-    if ratio >= 0.88:
-        return ratio, "typo"
-
-    return 0.0, "none"
+    return ratio, "none"
 
 
 def detect_name_clusters(names: list, counts: dict) -> list[dict]:
@@ -1079,17 +1079,43 @@ def apply_name_normalisation(df: pd.DataFrame, col: str,
 
 # ── Cross-facility RAMA normalisation + matching ──────────────────────────────
 
-_CF_PREFIX_RE = re.compile(r"^(RWA?/?|RSSB/?)\s*", re.IGNORECASE)
+_CF_PREFIX_RE = re.compile(r"^(RWA|RW|RSSB)", re.IGNORECASE)
 _CF_SEP_RE    = re.compile(r"[\s/\-]")
 _CF_LZERO_RE  = re.compile(r"^(0+)(\d+)$")
 
 
+def normalize_name(name: str) -> str:
+    """
+    Standardize patient name according to SDD rules.
+    - Reorder comma-separated names (Last, First -> First Last)
+    - Uppercase conversion
+    - Standardize punctuation (remove non-alphanumeric)
+    - Remove duplicate spaces & trim
+    """
+    if not name or pd.isna(name):
+        return ""
+    s = str(name).upper().strip()
+    if "," in s:
+        parts = [p.strip() for p in s.split(",")]
+        if len(parts) >= 2:
+            s = " ".join(parts[1:]) + " " + parts[0]
+    s = re.sub(r"[^A-Z0-9 ]", " ", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
+
+
 def normalize_rama(x) -> str:
     """
-    Canonical form of a RAMA/affiliation number for cross-system matching.
-    Strips: common prefixes (RW/, RWA/, RSSB/), separators, leading zeros.
+    Canonical form of a RAMA/affiliation number for cross-system matching according to SDD:
+    1. Remove prefixes (RW, RWA, RSSB)
+    2. Remove separators (/, -, space)
+    3. Convert to uppercase
+    4. Remove leading zeros
     """
-    s = _CF_PREFIX_RE.sub("", str(x).strip().upper())
+    if not x or pd.isna(x):
+        return ""
+    s = str(x).strip().upper()
+    s = _CF_PREFIX_RE.sub("", s)
     s = _CF_SEP_RE.sub("", s)
     m = _CF_LZERO_RE.match(s)
     return m.group(2) if m else s
@@ -1103,35 +1129,55 @@ def run_match(
     require_name: bool = True,
 ) -> pd.DataFrame:
     """
-    Match pharmacy vouchers against facility visit records.
-
-    Columns consumed from ph_work : _rama, _name, _date, _vou, _ins, _tot, _doc, _dpt
-    Columns consumed from fac_df  : _rama, _name, _date, _source, voucher_id
-
-    Returns a DataFrame with one row per pharmacy voucher and columns:
-        status       – MATCHED | UNLINKED | NO_RECORD
-        confidence   – 0–1 composite (MATCHED only; 0.0 for others)
-        ph_voucher, ph_patient, ph_rama, ph_date, ph_ins, ph_total,
-        ph_doctor, ph_dept
-        fac_voucher, fac_name, fac_date, fac_source  (None for NO_RECORD)
-        days_apart   – signed int: ph_date − fac_date
-                       (negative ⇒ pharmacy dispensed BEFORE facility visit)
-        name_score   – raw name similarity 0–1
+    Match pharmacy vouchers against facility visit records following SDD logic.
+    Optimized for performance by pre-calculating normalized fields and using indexes.
     """
     ph  = ph_work.copy()
     fac = fac_df.copy()
 
-    ph["_rn"]  = ph["_rama"].apply(normalize_rama)
-    fac["_rn"] = fac["_rama"].apply(normalize_rama)
+    # Pre-normalize all relevant fields for faster lookups/comparisons
+    ph["_rn"]   = ph["_rama"].apply(normalize_rama)
+    ph["_nn"]   = ph["_name"].apply(normalize_name)
+    ph["_an"]   = ph["_aff"].apply(normalize_name)
+    ph["_dn"]   = ph["_doc"].apply(normalize_name)
+    ph["_dpn"]  = ph["_dpt"].apply(normalize_name)
 
-    # Build O(1) RAMA index from facility records
-    fac_index = _dd(list)
-    for fr in fac.to_dict("records"):
-        fac_index[fr["_rn"]].append(fr)
+    fac["_rn"]  = fac["_rama"].apply(normalize_rama)
+    fac["_nn"]  = fac["_name"].apply(normalize_name)
+    fac["_an"]  = fac["_aff"].apply(normalize_name)
+    fac["_dn"]  = fac["doctor"].apply(normalize_name)
+    fac["_dpn"] = fac["_dept"].apply(normalize_name)
+
+    # Convert to records once
+    fac_records = fac.to_dict("records")
+    ph_records  = ph.to_dict("records")
+
+    # Indexes for multi-stage candidate generation
+    fac_by_id = _dd(list)
+    fac_by_aff = _dd(list)
+    for fr in fac_records:
+        fac_by_id[fr["_rn"]].append(fr)
+        if fr["_an"]:
+            fac_by_aff[fr["_an"]].append(fr)
 
     output_rows = []
-    for pr in ph.to_dict("records"):
-        candidates = fac_index.get(pr["_rn"], [])
+    for pr in ph_records:
+        # Stage 1: Exact Patient ID
+        candidates = fac_by_id.get(pr["_rn"], [])
+
+        # Stage 2: Affiliate Name fallback
+        if not candidates and pr["_an"]:
+            candidates = fac_by_aff.get(pr["_an"], [])
+
+        # Stage 3: Patient Name + Date Window fallback
+        if not candidates and pr["_nn"]:
+            # Limited scan: only records within date window
+            for fr in fac_records:
+                if pd.notna(pr["_date"]) and pd.notna(fr["_date"]):
+                    days = (pd.Timestamp(pr["_date"]) - pd.Timestamp(fr["_date"])).days
+                    if abs(days) <= date_window:
+                        if fuzz.token_sort_ratio(pr["_nn"], fr["_nn"]) >= 85:
+                            candidates.append(fr)
 
         if not candidates:
             output_rows.append(_cf_no_record(pr))
@@ -1143,16 +1189,53 @@ def run_match(
         best_ns   = 0.0
 
         for fr in candidates:
-            ns, _     = _match_score(str(pr["_name"]), str(fr["_name"]))
-            name_ok   = (ns >= name_thresh) if require_name else True
-            days, dok = _cf_check_date(pr["_date"], fr["_date"], date_window)
-            if name_ok and dok:
-                conf = _cf_conf(ns, days, date_window)
-                if conf > best_conf:
-                    best_conf, best_fr, best_days, best_ns = conf, fr, days, ns
+            # Scoring factors (using pre-normalized fields)
+            id_match = 1.0 if pr["_rn"] == fr["_rn"] else 0.0
+            ns = fuzz.token_sort_ratio(pr["_nn"], fr["_nn"]) / 100.0
 
-        if best_fr is not None:
-            output_rows.append(_cf_matched(pr, best_fr, best_conf, best_days, best_ns))
+            aff_score = 0.0
+            if pr["_an"] and fr["_an"]:
+                aff_score = fuzz.token_sort_ratio(pr["_an"], fr["_an"]) / 100.0
+
+            days, _ = _cf_check_date(pr["_date"], fr["_date"], date_window)
+            date_score = _cf_date_score(days)
+
+            doc_score = 0.0
+            if pr["_dn"] and fr["_dn"]:
+                doc_score = fuzz.token_sort_ratio(pr["_dn"], fr["_dn"]) / 100.0
+
+            dept_score = 0.0
+            if pr["_dpn"] and fr["_dpn"]:
+                dept_score = fuzz.token_sort_ratio(pr["_dpn"], fr["_dpn"]) / 100.0
+
+            # Weighted Scoring Engine (SDD Section 7)
+            # Patient ID (40), Name (25), Affiliate (10), Date (15), Doctor (5), Dept (5)
+            conf_score = (id_match * 40 +
+                          ns * 25 +
+                          aff_score * 10 +
+                          date_score * 15 +
+                          doc_score * 5 +
+                          dept_score * 5)
+
+            if conf_score > best_conf:
+                best_conf, best_fr, best_days, best_ns = conf_score, fr, days, ns
+
+        # SDD classification based on total score (0-100)
+        status = "MATCHED"
+        classification = "No Match"
+        if best_conf >= 95 and best_fr["_rn"] == pr["_rn"]:
+             classification = "Exact Match"
+        elif best_conf >= 85:
+             classification = "High Confidence Match"
+        elif best_conf >= 70:
+             classification = "Probable Match"
+        elif best_conf >= 50:
+             classification = "Review Required"
+        else:
+             status = "UNLINKED"
+
+        if status == "MATCHED":
+            output_rows.append(_cf_matched(pr, best_fr, best_conf, best_days, best_ns, classification))
         else:
             closest, closest_days = _cf_closest(candidates, pr["_date"])
             closest_ns, _         = _match_score(str(pr["_name"]), str(closest["_name"]))
@@ -1168,12 +1251,25 @@ def _cf_check_date(ph_date, fac_date, window):
     return days, (-1 <= days <= window)   # -1 buffer for same-day/timezone edge
 
 
+def _cf_date_score(days):
+    """
+    SDD Scoring based on distance:
+    0 days: 100%, 1: 95%, 2: 90%, 3: 85%, 4-7: reduced, >7: 0%
+    """
+    if days is None: return 0.0
+    d = abs(days)
+    if d == 0: return 1.0
+    if d == 1: return 0.95
+    if d == 2: return 0.90
+    if d == 3: return 0.85
+    if d <= 7: return 0.85 - (d - 3) * 0.10
+    return 0.0
+
+
 def _cf_conf(name_score, days, window):
-    """40 % name quality + 60 % date proximity (1.0 same-day → 0.0 at window+1)."""
-    if days is None:
-        return 0.0
-    day_prox = 1.0 - max(days, 0) / (window + 1)
-    return round(0.4 * name_score + 0.6 * day_prox, 3)
+    """Obsolete in favor of direct scoring in run_match, but kept for signature compatibility if needed."""
+    date_score = _cf_date_score(days)
+    return round(0.4 * name_score + 0.6 * date_score, 3)
 
 
 def _cf_closest(candidates, ph_date):
@@ -1192,17 +1288,20 @@ def _cf_base(pr):
     return {"ph_voucher": pr["_vou"], "ph_patient": pr["_name"],
             "ph_rama": pr["_rama"],   "ph_date": pr["_date"],
             "ph_ins": pr["_ins"],     "ph_total": pr["_tot"],
-            "ph_doctor": pr["_doc"],  "ph_dept": pr["_dpt"]}
+            "ph_doctor": pr["_doc"],  "ph_dept": pr["_dpt"],
+            "ph_aff": pr.get("_aff", "")}
 
 
 def _cf_no_record(pr):
     return {**_cf_base(pr), "status": "NO_RECORD", "confidence": 0.0,
+            "classification": "No Match",
             "fac_voucher": None, "fac_name": None, "fac_date": None,
             "fac_source": None, "days_apart": None, "name_score": None}
 
 
-def _cf_matched(pr, fr, conf, days, ns):
+def _cf_matched(pr, fr, conf, days, ns, classification):
     return {**_cf_base(pr), "status": "MATCHED", "confidence": conf,
+            "classification": classification,
             "fac_voucher": fr.get("voucher_id"), "fac_name": fr["_name"],
             "fac_date": fr["_date"],  "fac_source": fr["_source"],
             "days_apart": days,       "name_score": round(ns, 2)}
@@ -1210,6 +1309,7 @@ def _cf_matched(pr, fr, conf, days, ns):
 
 def _cf_unlinked(pr, fr, days, ns):
     return {**_cf_base(pr), "status": "UNLINKED", "confidence": 0.0,
+            "classification": "No Match",
             "fac_voucher": fr.get("voucher_id"), "fac_name": fr["_name"],
             "fac_date": fr["_date"],  "fac_source": fr["_source"],
             "days_apart": days,       "name_score": round(ns, 2)}
@@ -1261,6 +1361,13 @@ _SYSTEM_FIELDS = {
         "dtype_hints": ["object"],
         "required": False,
     },
+    "affiliate_name": {
+        "label": "Affiliate Name",
+        "group": "Patient",
+        "patterns": [r"affiliate", r"mutuelle", r"adherent"],
+        "dtype_hints": ["object"],
+        "required": False,
+    },
     "visit_date": {
         "label": "Visit / Dispensing Date",
         "group": "Visit",
@@ -1285,6 +1392,13 @@ _SYSTEM_FIELDS = {
         "patterns": [r"practitioner.?name", r"doctor.?name", r"prescriber",
                      r"medecin", r"nom.?medecin", r"physician.?name",
                      r"provider.?name"],
+        "dtype_hints": ["object"],
+        "required": False,
+    },
+    "department": {
+        "label": "Department",
+        "group": "Provider",
+        "patterns": [r"department", r"service", r"unite"],
         "dtype_hints": ["object"],
         "required": False,
     },
@@ -3222,6 +3336,8 @@ with tab_xfac:
             vou_c   = _find([r"voucher.*id", r"voucher.*ident", r"paper.*code", r"invoice.*no"])
             total_c = _find([r"total.*amount", r"total.*cost", r"^total$"])
             doc_c   = _find([r"practitioner", r"prescrib", r"doctor", r"physician", r"medecin"])
+            aff_c   = _find([r"affiliate", r"mutuelle", r"adherent"])
+            dept_c  = _find([r"department", r"service", r"unite"])
 
             if not rama_c:
                 return None, f"No RAMA/Affiliation column found in {chosen_name!r}"
@@ -3237,6 +3353,8 @@ with tab_xfac:
             out["voucher_id"]  = chosen_df[vou_c].astype(str).str.strip() if vou_c else ""
             out["total"]       = pd.to_numeric(chosen_df[total_c], errors="coerce").fillna(0) if total_c else 0
             out["doctor"]      = chosen_df[doc_c].fillna("").astype(str).str.strip() if doc_c else ""
+            out["_aff"]        = chosen_df[aff_c].fillna("").astype(str).str.strip() if aff_c else ""
+            out["_dept"]       = chosen_df[dept_c].fillna("").astype(str).str.strip() if dept_c else ""
             out["_source"]     = filename
             out["_sheet"]      = chosen_name
             out = out[out["_rama"].str.len() > 2].reset_index(drop=True)
@@ -3305,7 +3423,8 @@ with tab_xfac:
     ins_c = _ph_col("insurance_copay","Insurance Co-payment")
     tot_c = _ph_col("amount","total_cost","Total Cost")
     doc_c = _ph_col("doctor_name","practitioner_name","Practitioner Name")
-    dpt_c = _ph_col("practitioner_type","Practitioner Type")
+    dpt_c = _ph_col("department", "practitioner_type","Practitioner Type")
+    aff_c = _ph_col("affiliate_name")
 
     ph_work = df.copy()
     ph_work["_rama"]  = ph_work[rma_c].astype(str).str.strip().str.upper() if rma_c else ""
@@ -3316,6 +3435,7 @@ with tab_xfac:
     ph_work["_tot"]   = pd.to_numeric(ph_work[tot_c], errors="coerce").fillna(0) if tot_c else 0
     ph_work["_doc"]   = ph_work[doc_c].fillna("").astype(str)              if doc_c else ""
     ph_work["_dpt"]   = ph_work[dpt_c].fillna("").astype(str)              if dpt_c else ""
+    ph_work["_aff"]   = ph_work[aff_c].fillna("").astype(str)              if aff_c else ""
 
     # ── Core matching ─────────────────────────────────────────────────────────
     res_df = run_match(
@@ -3537,11 +3657,11 @@ with tab_xfac:
 
         t2_show = t2_disp[[
             "ph_voucher","ph_patient","ph_rama","ph_date","ph_ins",
-            "fac_name","fac_date","fac_source","days_apart","name_score"
+            "fac_name","fac_date","fac_source","days_apart","name_score", "classification"
         ]].copy()
         t2_show.columns = [
             "Pharmacy Voucher","Pharmacy Patient","RAMA","Pharmacy Date","Insurance (RWF)",
-            "Facility Patient","Facility Visit Date","Facility","Days Apart","Name Score"
+            "Facility Patient","Facility Visit Date","Facility","Days Apart","Name Score", "Classification"
         ]
         for dcol in ["Pharmacy Date","Facility Visit Date"]:
             t2_show[dcol] = pd.to_datetime(t2_show[dcol], errors="coerce").dt.strftime("%d/%m/%Y").fillna("—")
@@ -3600,12 +3720,12 @@ with tab_xfac:
         t3_search = st.text_input("🔍 Search verified records", key="t3_srch")
         t3_show = matched[[
             "ph_voucher","ph_patient","ph_rama","ph_date","ph_ins",
-            "fac_voucher","fac_name","fac_date","fac_source","days_apart","name_score","confidence"
+            "fac_voucher","fac_name","fac_date","fac_source","days_apart","name_score","confidence", "classification"
         ]].copy()
         t3_show.columns = [
             "Pharmacy Voucher","Pharmacy Patient","RAMA","Pharmacy Date","Insurance (RWF)",
             "Facility Voucher","Facility Patient","Facility Date","Facility",
-            "Days Apart","Name Score","Match Quality"
+            "Days Apart","Name Score","Score","Classification"
         ]
         for dcol in ["Pharmacy Date","Facility Date"]:
             t3_show[dcol] = pd.to_datetime(t3_show[dcol], errors="coerce").dt.strftime("%d/%m/%Y").fillna("—")
