@@ -1,0 +1,123 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Case {
+  id                String            @id @default(cuid())
+  name              String
+  status            CaseStatus        @default(OPEN)
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  pharmacyRecords   PharmacyRecord[]
+  facilityRecords   FacilityRecord[]
+  meta              Json?             // Stores period, pharmacy name, etc.
+}
+
+enum CaseStatus {
+  OPEN
+  REVIEWING
+  CLOSED
+  ARCHIVED
+}
+
+model PharmacyRecord {
+  id                String            @id @default(cuid())
+  caseId            String
+  case              Case              @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  voucherId         String?
+  patientId         String?
+  patientName       String?
+  visitDate         DateTime?
+  doctorName        String?
+  doctorType        String?
+  facility          String?
+  drugCode          String?
+  drugName          String?
+  quantity          Float?
+  diagnosis         String?
+  amount            Float?
+  insuranceCopay    Float?
+  patientCopay      Float?
+  medicineCost      Float?
+  gender            String?
+  patientType       String?
+
+  raw               Json              // Original row data
+
+  status            VerificationStatus @default(PENDING)
+  deductionAmount   Float?
+  deductionReason   String?
+  analystComment    String?
+
+  match             Match?
+  rulesFired        RuleFire[]
+
+  @@index([caseId])
+}
+
+enum VerificationStatus {
+  PENDING
+  FLAGGED
+  REVIEWED
+  APPROVED
+  REJECTED
+}
+
+model FacilityRecord {
+  id                String            @id @default(cuid())
+  caseId            String
+  case              Case              @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  ramaNumber        String
+  patientName       String?
+  visitDate         DateTime?
+  voucherId         String?
+  amount            Float?
+  doctor            String?
+  sourceFile        String
+
+  matches           Match[]
+
+  @@index([caseId])
+}
+
+model Match {
+  id                String            @id @default(cuid())
+  pharmacyRecordId  String            @unique
+  pharmacyRecord    PharmacyRecord    @relation(fields: [pharmacyRecordId], references: [id], onDelete: Cascade)
+
+  facilityRecordId  String?
+  facilityRecord    FacilityRecord?   @relation(fields: [facilityRecordId], references: [id])
+
+  status            MatchStatus
+  confidence        Float
+  daysApart         Int?
+  nameScore         Float?
+
+  @@index([facilityRecordId])
+}
+
+enum MatchStatus {
+  MATCHED
+  UNLINKED
+  NO_RECORD
+}
+
+model RuleFire {
+  id                String            @id @default(cuid())
+  pharmacyRecordId  String
+  pharmacyRecord    PharmacyRecord    @relation(fields: [pharmacyRecordId], references: [id], onDelete: Cascade)
+
+  ruleId            String
+  score             Float
+  reason            String
+  evidence          String?
+
+  @@index([pharmacyRecordId])
+}
