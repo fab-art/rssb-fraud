@@ -121,6 +121,8 @@ def init_session_state():
         st.session_state.current_claim_idx = 0
     if "data_prep_done" not in st.session_state:
         st.session_state.data_prep_done = False
+    if "data_lake" not in st.session_state:
+        st.session_state.data_lake = {}
 
 init_session_state()
 
@@ -494,17 +496,38 @@ with st.sidebar:
     
     st.divider()
     
-    # Clear data
-    if st.button("🔄 Reset All"):
-        st.session_state.pharmacy_df_raw = None
-        st.session_state.pharmacy_df = None
-        st.session_state.hospital_df_raw = None
-        st.session_state.hospital_df = None
-        st.session_state.pharmacy_mapping = {}
-        st.session_state.hospital_mapping = {}
-        st.session_state.verifications = {}
-        st.session_state.data_prep_done = False
-        st.success("✅ All data cleared")
+    # Data Lake Status Panel
+    st.markdown("<div style='font-family:Syne;font-size:13px;font-weight:700;color:#e2e8f0;margin-bottom:8px'>🗄️ Data Lake</div>", unsafe_allow_html=True)
+    
+    _dl = st.session_state.get("data_lake", {})
+    _dl_committed = _dl.get("committed", False)
+    
+    if _dl_committed:
+        _dl_ts = _dl.get("committed_at", "—")
+        _dl_rows = _dl.get("source_rows", 0)
+        st.markdown(f"""
+<div style='background:#031a0a;border:1px solid #16a34a;border-radius:8px;padding:10px 12px;
+     font-size:11px;font-family:monospace;line-height:1.8;margin-bottom:12px'>
+  <b style='color:#22c55e'>✅ ACTIVE</b><br>
+  <div style='color:#64748b'>Rows: <span style='color:#94a3b8'>{_dl_rows:,}</span></div>
+  <div style='color:#64748b'>Committed: <span style='color:#94a3b8'>{_dl_ts}</span></div>
+</div>""", unsafe_allow_html=True)
+        
+        if st.button("🗑️ Clear Data Lake", use_container_width=True, type="secondary"):
+            st.session_state.data_lake = {}
+            st.session_state.pharmacy_df = None
+            st.session_state.hospital_df = None
+            st.success("✅ Data lake cleared")
+            st.rerun()
+    else:
+        st.markdown("""
+<div style='background:#1a0f0f;border:1px solid #5f3333;border-radius:8px;padding:10px 12px;
+     font-size:11px;font-family:monospace;line-height:1.8'>
+  <div style='color:#64748b'>Data Lake</div>
+  <b style='color:#ef4444'>NOT COMMITTED</b>
+</div>""", unsafe_allow_html=True)
+    
+    st.divider()
 
 # ══════════════════════════════════════════════════════════════════════════════
 # MAIN: DATA PREPARATION IF NEEDED
@@ -729,9 +752,64 @@ if not st.session_state.data_prep_done:
 if not st.session_state.data_prep_done:
     st.stop()
 
-pharmacy_df = st.session_state.pharmacy_df
-hospital_df = st.session_state.hospital_df
-verifications = st.session_state.verifications
+# ══════════════════════════════════════════════════════════════════════════════
+# COMMIT TO DATA LAKE (from app.py)
+# ══════════════════════════════════════════════════════════════════════════════
+
+if st.session_state.data_prep_done and not st.session_state.data_lake.get("committed", False):
+    with st.expander("🚀 **Commit to Data Lake**", expanded=False):
+        st.markdown("""
+<div style='background:#030d1a;border:1px solid #1e3a5f;border-radius:10px;
+     padding:12px 14px;margin-bottom:12px;font-size:11px;line-height:1.8'>
+  <div style='color:#38bdf8;font-weight:600;margin-bottom:6px'>💾 What is the Data Lake?</div>
+  <div style='color:#64748b;font-family:monospace'>
+    • Stores your prepared data in the session<br>
+    • All tabs read from this single source<br>
+    • Reuse without re-uploading or re-mapping<br>
+    • Clear anytime with <b style='color:#ef4444'>Clear Data Lake</b> button<br>
+  </div>
+</div>""", unsafe_allow_html=True)
+        
+        _commit_btn = st.button("🚀 Commit to Data Lake", type="primary", use_container_width=True, key="commit_lake")
+        
+        if _commit_btn:
+            with st.spinner("Processing data lake…"):
+                try:
+                    from datetime import datetime as _dt
+                    
+                    # Get the prepared dataframes
+                    pharm_df = st.session_state.pharmacy_df
+                    hosp_df = st.session_state.hospital_df
+                    
+                    # Store in data lake
+                    st.session_state.data_lake = {
+                        "committed": True,
+                        "pharmacy_df": pharm_df,
+                        "hospital_df": hosp_df,
+                        "verifications": {},
+                        "source_rows": len(pharm_df),
+                        "columns": list(pharm_df.columns),
+                        "committed_at": _dt.now().strftime("%d/%m/%Y %H:%M"),
+                        "pharmacy_mapping": st.session_state.pharmacy_mapping,
+                        "hospital_mapping": st.session_state.hospital_mapping,
+                    }
+                    
+                    st.success(
+                        f"✅ Data lake committed! **{len(pharm_df):,} rows** from pharmacy records"
+                    )
+                    st.markdown("""
+<div style='background:#031a0a;border:1px solid #16a34a;border-radius:10px;
+     padding:12px 14px;margin-top:10px;font-family:monospace;font-size:11px'>
+  <b style='color:#22c55e'>🎉 Data lake is now active!</b><br>
+  <span style='color:#16a34a'>All tabs read from your committed data</span>
+</div>""", unsafe_allow_html=True)
+                    st.rerun()
+                except Exception as _ce:
+                    st.error(f"❌ Commit failed: {_ce}")
+
+pharmacy_df = st.session_state.data_lake.get("pharmacy_df") or st.session_state.pharmacy_df
+hospital_df = st.session_state.data_lake.get("hospital_df") or st.session_state.hospital_df
+verifications = st.session_state.data_lake.get("verifications", {}) or st.session_state.verifications
 
 # Config
 with st.sidebar:
