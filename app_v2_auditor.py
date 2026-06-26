@@ -335,6 +335,22 @@ HOSPITAL_REQUIRED = {
 # UTILITY FUNCTIONS
 # ══════════════════════════════════════════════════════════════════════════════
 
+def parse_date(val):
+    """Safely parse date string to datetime."""
+    if pd.isna(val):
+        return None
+    if isinstance(val, pd.Timestamp):
+        return val
+    for fmt in ["%d/%m/%Y", "%Y-%m-%d", "%m/%d/%Y", "%d-%m-%Y", "%Y/%m/%d"]:
+        try:
+            return pd.to_datetime(val, format=fmt)
+        except:
+            pass
+    try:
+        return pd.to_datetime(val)
+    except:
+        return None
+
 def find_best_column_match(target_field, available_columns):
     """
     Find best matching column for a target field using fuzzy matching.
