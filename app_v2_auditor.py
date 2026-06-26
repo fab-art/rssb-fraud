@@ -11,13 +11,16 @@ Run:
     streamlit run app_v3_with_dataprep.py
 """
 
+import difflib
 import io
+import re
 import warnings
-from collections import defaultdict
+from collections import defaultdict as _dd
 from datetime import datetime, timedelta
 
 import matplotlib
 matplotlib.use("Agg")
+import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
@@ -46,6 +49,55 @@ TEXT = "#e2e8f0"
 DARK = "#0d1117"
 CARD = "#111720"
 BORDER = "#1e2a38"
+
+# ── Column normalisation — tuned to real Pharmacie Vinca / RAMA vouchers ──────
+COLUMN_MAP = {
+    # ── Exact columns from the real data ──────────────────────────────────────
+    r"#":                                               "row_number",
+    r"paper.?code":                                     "voucher_id",
+    r"dispensing.?date":                                "visit_date",
+    r"patient.?name":                                   "patient_name",
+    r"patient.?type":                                   "patient_type",
+    r"gender":                                          "gender",
+    r"is.?newborn":                                     "is_newborn",
+    r"rama.?number":                                    "patient_id",
+    r"practitioner.?name":                              "doctor_name",
+    r"practitioner.?type":                              "doctor_type",
+    r"total.?cost":                                     "amount",
+    r"patient.?co.?payment":                            "patient_copay",
+    r"insurance.?co.?payment":                          "insurance_copay",
+    r"medicine.?cost":                                  "medicine_cost",
+    # ── Generic fallbacks ─────────────────────────────────────────────────────
+    r"patient.?(id|no|num|number|code)?":               "patient_id",
+    r"pat.?id|pid":                                     "patient_id",
+    r"doctor.?(id|no|num|code)?":                       "doctor_id",
+    r"(doctor|dr|physician|prescriber).?name":          "doctor_name",
+    r"doc.?id|did":                                     "doctor_id",
+    r"prescriber":                                      "doctor_name",
+    r"(visit|service|rx|voucher).?date":                "visit_date",
+    r"date.?(of.?)?(visit|service|dispensing)?":        "visit_date",
+    r"date":                                            "visit_date",
+    r"(pharmacy|facility|clinic|hospital|branch).?(name|id|code)?": "facility",
+    r"(drug|medicine|medication|item|product).?(name|description|desc)?": "drug_name",
+    r"(drug|medicine|medication|item|product).?(code|id)?":              "drug_code",
+    r"(amount|cost|price|value|total|charge)":          "amount",
+    r"quantity|qty":                                    "quantity",
+    r"(diagnosis|diag|icd|condition)":                  "diagnosis",
+    r"(voucher|claim|ref|reference).?(no|number|id|code)?": "voucher_id",
+}
+
+# Pre-compile regex patterns for column matching
+_COLUMN_PATTERNS = [(re.compile(pattern), target) for pattern, target in COLUMN_MAP.items()]
+
+# ── Matplotlib colour scheme ───────────────────────────────────────────────────
+plt.rcParams.update({
+    "figure.facecolor": CARD,  "axes.facecolor":  DARK,
+    "axes.edgecolor":   BORDER,"axes.labelcolor": MUTED,
+    "axes.titlecolor":  TEXT,  "xtick.color":     MUTED,
+    "ytick.color":      MUTED, "text.color":      TEXT,
+    "grid.color":       BORDER,"grid.linewidth":  0.5,
+    "font.family":      "monospace", "font.size": 9,
+})
 
 st.markdown("""
 <style>
@@ -94,6 +146,171 @@ h1, h2, h3 { font-family: 'Syne', sans-serif !important; }
 
 </style>
 """, unsafe_allow_html=True)
+
+# ══════════════════════════════════════════════════════════════════════════════
+# DATA PREPARATION FUNCTIONS (from app.py)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@st.cache_data(show_spinner=False)
+def load_and_process(file_bytes: bytes, filename: str, rapid_days: int):
+    """Load file (CSV/XLSX/ODS), normalise columns, parse dates, compute statistics."""
+    fname = filename.lower()
+    if fname.endswith(".csv"):
+        df = pd.read_csv(io.BytesIO(file_bytes), encoding="utf-8", on_bad_lines="skip", dtype_backend="pyarrow")
+    elif fname.endswith((".xlsx", ".xls")):
+        df = pd.read_excel(io.BytesIO(file_bytes), dtype_backend="pyarrow")
+    elif fname.endswith(".ods"):
+        df = pd.read_excel(io.BytesIO(file_bytes), engine="odf", dtype_backend="pyarrow")
+    else:
+        raise ValueError("Unsupported file type. Use CSV, XLSX, XLS, or ODS.")
+
+    # Normalise column names (optimized with pre-compiled patterns)
+    renamed, used = {}, {}
+    for col in df.columns:
+        key = re.sub(r"[^a-z0-9]", "_", col.lower().strip())
+        key = re.sub(r"_+", "_", key).strip("_")
+        matched = False
+        for pattern, target in _COLUMN_PATTERNS:
+            if pattern.fullmatch(key):
+                if target not in used:
+                    renamed[col] = target
+                    used[target] = col
+                    matched = True
+                break
+        if not matched:
+            renamed[col] = key
+    df = df.rename(columns=renamed)
+
+    # Parse dates
+    if "visit_date" in df.columns:
+        df["visit_date"] = pd.to_datetime(df["visit_date"], errors="coerce")
+    else:
+        for col in df.columns:
+            _dstr = str(df[col].dtype)
+            if _dstr == "object" or "string" in _dstr or "large_string" in _dstr:
+                try:
+                    parsed = pd.to_datetime(df[col], errors="coerce")
+                    if parsed.notna().sum() > len(df) * 0.5:
+                        df["visit_date"] = parsed
+                        break
+                except Exception:
+                    pass
+
+    # Summary stats
+    s = {"total_rows": len(df), "columns": list(df.columns)}
+    id_col = "patient_id" if "patient_id" in df.columns else "patient_name" if "patient_name" in df.columns else None
+    if id_col:
+        vc = df[id_col].value_counts()
+        s["patient_col"]     = id_col
+        s["unique_patients"] = int(df[id_col].nunique())
+        s["repeat_patients"] = int((vc > 1).sum())
+        s["max_visits"]      = int(vc.max())
+        s["top_patients"]    = vc.head(15).rename_axis("id").reset_index(name="visits")
+    dcol = "doctor_name" if "doctor_name" in df.columns else "doctor_id" if "doctor_id" in df.columns else None
+    if dcol:
+        dvc = df[dcol].value_counts()
+        s["unique_doctors"] = int(df[dcol].nunique())
+        s["top_doctors"]    = dvc.head(15).rename_axis("doctor").reset_index(name="visits")
+        s["doctor_col"]     = dcol
+    if "visit_date" in df.columns:
+        v = df["visit_date"].dropna()
+        if len(v):
+            s["date_min"] = str(v.min().date())
+            s["date_max"] = str(v.max().date())
+    if "facility" in df.columns:
+        fvc = df["facility"].value_counts()
+        s["unique_facilities"] = int(df["facility"].nunique())
+        s["top_facilities"]    = fvc.head(10).rename_axis("name").reset_index(name="visits")
+    for amt_col in ["amount", "medicine_cost", "insurance_copay", "patient_copay"]:
+        if amt_col in df.columns:
+            df[amt_col] = pd.to_numeric(df[amt_col], errors="coerce")
+    if "amount" in df.columns:
+        s["total_amount"] = round(float(df["amount"].sum()), 2)
+        s["avg_amount"]   = round(float(df["amount"].mean()), 2)
+
+    # Repeat visits (optimized with vectorized operations)
+    repeat_groups, repeat_detail = [], pd.DataFrame()
+    if id_col:
+        vc2 = df[id_col].value_counts()
+        repeat_ids = vc2[vc2 > 1].index.tolist()
+        rdf = df[df[id_col].isin(repeat_ids)].copy()
+        if "visit_date" in rdf.columns:
+            rdf = rdf.sort_values([id_col, "visit_date"])
+        repeat_detail = rdf.head(500)
+        has_name = "patient_name" in rdf.columns and id_col != "patient_name"
+        has_date = "visit_date" in rdf.columns
+        top_rdf  = rdf[rdf[id_col].isin(repeat_ids[:300])]
+        for pid, grp in top_rdf.groupby(id_col, sort=False):
+            entry = {id_col: str(pid), "visits": int(len(grp))}
+            if has_name:
+                entry["patient_name"] = str(grp["patient_name"].iloc[0])
+            if has_date:
+                dates = grp["visit_date"].dropna().sort_values()
+                entry["dates"] = ", ".join(str(d.date()) for d in dates if pd.notna(d))
+            repeat_groups.append(entry)
+        repeat_groups.sort(key=lambda x: x["visits"], reverse=True)
+
+    # Rapid revisits (optimized using groupby and diff)
+    rapid = []
+    if id_col and "visit_date" in df.columns:
+        cols = [id_col, "visit_date"]
+        if "patient_name" in df.columns and id_col != "patient_name":
+            cols.append("patient_name")
+        if dcol:
+            cols.append(dcol)
+        sub = df[cols].dropna(subset=[id_col, "visit_date"]).sort_values([id_col, "visit_date"])
+        
+        sub["_prev_date"] = sub.groupby(id_col)["visit_date"].shift(1)
+        sub["_days_diff"] = (sub["visit_date"] - sub["_prev_date"]).dt.days
+        
+        rapid_mask = (sub["_days_diff"] > 0) & (sub["_days_diff"] <= rapid_days)
+        rapid_df = sub[rapid_mask].copy()
+        
+        if len(rapid_df) > 0:
+            rapid_dict = {
+                "patient_id": rapid_df[id_col].astype(str).tolist(),
+                "patient_name": (rapid_df["patient_name"].astype(str).tolist() if "patient_name" in rapid_df.columns 
+                                 else rapid_df[id_col].astype(str).tolist()),
+                "visit_1": rapid_df["_prev_date"].dt.strftime("%Y-%m-%d").tolist(),
+                "visit_2": rapid_df["visit_date"].dt.strftime("%Y-%m-%d").tolist(),
+                "days_apart": rapid_df["_days_diff"].astype(int).tolist(),
+            }
+            if dcol and dcol in rapid_df.columns:
+                rapid_dict["doctor"] = rapid_df[dcol].astype(str).tolist()
+            else:
+                rapid_dict["doctor"] = ["—"] * len(rapid_df)
+            
+            rapid = [dict(zip(rapid_dict.keys(), [rapid_dict[k][i] for k in rapid_dict.keys()]))
+                     for i in range(len(rapid_dict["patient_id"]))]
+
+    # Column map
+    col_map = {v: k for k, v in used.items()}
+
+    return df, col_map, s, repeat_groups, repeat_detail, rapid
+
+
+def build_network_graph(df: pd.DataFrame):
+    """Build tripartite graph: Doctor ↔ Patient ↔ Drug."""
+    G = nx.Graph()
+    
+    doctor_col = "doctor_name" if "doctor_name" in df.columns else "doctor_id" if "doctor_id" in df.columns else None
+    patient_col = "patient_name" if "patient_name" in df.columns else "patient_id" if "patient_id" in df.columns else None
+    drug_col = "drug_name" if "drug_name" in df.columns else "medicine_name" if "medicine_name" in df.columns else None
+    
+    if not (doctor_col and patient_col and drug_col):
+        return G
+    
+    sub = df[[doctor_col, patient_col, drug_col]].dropna()
+    
+    for _, row in sub.iterrows():
+        doc = f"Dr:{row[doctor_col]}"
+        pat = f"Pt:{row[patient_col]}"
+        drug = f"Rx:{row[drug_col]}"
+        
+        G.add_edge(doc, pat)
+        G.add_edge(pat, drug)
+    
+    return G
 
 # ══════════════════════════════════════════════════════════════════════════════
 # SESSION STATE & DATA STRUCTURES
