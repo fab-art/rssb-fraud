@@ -338,7 +338,14 @@ if not st.session_state.data_prep_done:
     with st.expander("📂 Available Columns", expanded=False):
         st.code(", ".join(st.session_state.pharmacy_df_raw.columns.tolist()))
     
-    pharmacy_mapping = {}
+    # Initialize pharmacy_mapping in session state if not exists
+    if "temp_pharmacy_mapping" not in st.session_state:
+        st.session_state.temp_pharmacy_mapping = {}
+        # Auto-suggest mappings on first load
+        for req_field in PHARMACY_REQUIRED.keys():
+            best_col, score = find_best_column_match(req_field, st.session_state.pharmacy_df_raw.columns.tolist())
+            if best_col:
+                st.session_state.temp_pharmacy_mapping[req_field] = best_col
     
     # Auto-suggest mappings
     auto_mappings = {}
@@ -355,6 +362,7 @@ if not st.session_state.data_prep_done:
     
     st.divider()
     
+    pharmacy_mapping = {}
     for system_field, description in PHARMACY_REQUIRED.items():
         c1, c2, c3 = st.columns([2, 2, 1])
         
@@ -363,15 +371,21 @@ if not st.session_state.data_prep_done:
             st.caption(description)
         
         with c2:
-            suggested = auto_mappings.get(system_field)
+            current_val = st.session_state.temp_pharmacy_mapping.get(system_field)
+            idx_val = 0
+            all_cols = [None] + st.session_state.pharmacy_df_raw.columns.tolist()
+            if current_val in all_cols:
+                idx_val = all_cols.index(current_val)
+            
             selected_col = st.selectbox(
                 "Select column",
-                [None] + st.session_state.pharmacy_df_raw.columns.tolist(),
-                index=([None] + st.session_state.pharmacy_df_raw.columns.tolist()).index(suggested) if suggested else 0,
+                all_cols,
+                index=idx_val,
                 key=f"pharm_map_{system_field}",
                 label_visibility="collapsed"
             )
             pharmacy_mapping[system_field] = selected_col
+            st.session_state.temp_pharmacy_mapping[system_field] = selected_col
         
         with c3:
             if selected_col:
@@ -389,7 +403,8 @@ if not st.session_state.data_prep_done:
         st.subheader("🏥 Hospital Records Mapping (Optional)")
         st.caption(f"Detected {len(st.session_state.hospital_df_raw.columns)} columns")
         
-        hospital_mapping = {}
+        if "temp_hospital_mapping" not in st.session_state:
+            st.session_state.temp_hospital_mapping = {}
         
         # Auto-suggest
         auto_mappings_hosp = {}
@@ -406,6 +421,7 @@ if not st.session_state.data_prep_done:
         
         st.divider()
         
+        hospital_mapping = {}
         for system_field, description in HOSPITAL_REQUIRED.items():
             c1, c2, c3 = st.columns([2, 2, 1])
             
@@ -414,15 +430,21 @@ if not st.session_state.data_prep_done:
                 st.caption(description)
             
             with c2:
-                suggested = auto_mappings_hosp.get(system_field)
+                current_val = st.session_state.temp_hospital_mapping.get(system_field)
+                idx_val = 0
+                all_cols = [None] + st.session_state.hospital_df_raw.columns.tolist()
+                if current_val in all_cols:
+                    idx_val = all_cols.index(current_val)
+                
                 selected_col = st.selectbox(
                     "Select column",
-                    [None] + st.session_state.hospital_df_raw.columns.tolist(),
-                    index=([None] + st.session_state.hospital_df_raw.columns.tolist()).index(suggested) if suggested else 0,
+                    all_cols,
+                    index=idx_val,
                     key=f"hosp_map_{system_field}",
                     label_visibility="collapsed"
                 )
                 hospital_mapping[system_field] = selected_col
+                st.session_state.temp_hospital_mapping[system_field] = selected_col
             
             with c3:
                 if selected_col:
@@ -474,6 +496,7 @@ if not st.session_state.data_prep_done:
             st.dataframe(stats_df, use_container_width=True, hide_index=True)
         
         # Hospital validation
+        hosp_transformed = None
         if hospital_mapping and any(hospital_mapping.values()):
             hosp_transformed, hosp_report = validate_and_transform(
                 st.session_state.hospital_df_raw,
@@ -482,28 +505,31 @@ if not st.session_state.data_prep_done:
                 "hospital"
             )
             
-            if hosp_report["status"] != "error":
+            if hosp_report["status"] == "error":
+                st.error(f"❌ Hospital validation errors: {hosp_report['errors']}")
+            elif hosp_report["status"] == "warning":
+                st.warning(f"⚠️ Hospital warnings: {hosp_report['warnings']}")
+            else:
                 st.success("✅ Hospital records validated")
         
         # CONFIRM & PROCEED
         st.divider()
         
-        # Allow proceeding if no errors (warnings are OK)
+        # Allow proceeding if pharmacy has no errors (warnings are OK)
         can_proceed = pharm_report["status"] != "error"
         
-        confirm_col, _ = st.columns([1, 3])
-        with confirm_col:
-            if st.button("✅ Confirm & Proceed to Verification", type="primary", use_container_width=True, disabled=not can_proceed):
-                st.session_state.pharmacy_mapping = pharmacy_mapping
-                st.session_state.hospital_mapping = hospital_mapping
-                st.session_state.pharmacy_df = pharm_transformed
-                
-                if hospital_mapping and any(hospital_mapping.values()):
-                    st.session_state.hospital_df = hosp_transformed
-                
-                st.session_state.data_prep_done = True
-                st.success("✅ Data preparation complete! Reloading...")
-                st.rerun()
+        if st.button("✅ Confirm & Proceed to Verification", type="primary", use_container_width=True, disabled=not can_proceed):
+            # Save to session state
+            st.session_state.pharmacy_mapping = pharmacy_mapping
+            st.session_state.hospital_mapping = hospital_mapping
+            st.session_state.pharmacy_df = pharm_transformed
+            
+            if hosp_transformed is not None:
+                st.session_state.hospital_df = hosp_transformed
+            
+            st.session_state.data_prep_done = True
+            st.balloons()
+            st.rerun()
     else:
         st.warning("⚠️ Please map all required fields to proceed")
 
