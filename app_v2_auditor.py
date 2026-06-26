@@ -11,7 +11,9 @@ Run:
     streamlit run app_v3_with_dataprep.py
 """
 
+import difflib
 import io
+import re
 import warnings
 from collections import defaultdict
 from datetime import datetime, timedelta
