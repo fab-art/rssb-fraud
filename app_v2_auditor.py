@@ -449,8 +449,10 @@ if not st.session_state.data_prep_done:
         # Show validation result
         if pharm_report["status"] == "error":
             st.error(f"❌ Validation errors: {pharm_report['errors']}")
+            st.info("⚠️ Fix errors above before proceeding")
         elif pharm_report["status"] == "warning":
-            st.warning(f"⚠️ Warnings: {pharm_report['warnings']}")
+            st.warning(f"⚠️ Minor warnings (can proceed): {pharm_report['warnings']}")
+            st.info("💡 A small number of records have incomplete/unparseable values. You can proceed — they'll be handled gracefully during analysis.")
         else:
             st.success("✅ All validations passed!")
         
@@ -486,9 +488,12 @@ if not st.session_state.data_prep_done:
         # CONFIRM & PROCEED
         st.divider()
         
+        # Allow proceeding if no errors (warnings are OK)
+        can_proceed = pharm_report["status"] != "error"
+        
         confirm_col, _ = st.columns([1, 3])
         with confirm_col:
-            if st.button("✅ Confirm & Proceed to Verification", type="primary", use_container_width=True):
+            if st.button("✅ Confirm & Proceed to Verification", type="primary", use_container_width=True, disabled=not can_proceed):
                 st.session_state.pharmacy_mapping = pharmacy_mapping
                 st.session_state.hospital_mapping = hospital_mapping
                 st.session_state.pharmacy_df = pharm_transformed
