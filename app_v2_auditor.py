@@ -335,6 +335,47 @@ HOSPITAL_REQUIRED = {
 # UTILITY FUNCTIONS
 # ══════════════════════════════════════════════════════════════════════════════
 
+def find_best_column_match(target_field, available_columns):
+    """
+    Find best matching column for a target field using fuzzy matching.
+    Returns (column_name, match_score) or (None, 0)
+    """
+    if not available_columns:
+        return None, 0
+    
+    target_lower = target_field.lower()
+    col_lower = [c.lower() for c in available_columns]
+    
+    # Exact match
+    for i, c in enumerate(col_lower):
+        if c == target_lower:
+            return available_columns[i], 100
+    
+    # Keyword matching
+    keywords = {
+        "paper_code": ["paper", "code", "voucher", "id", "claim"],
+        "patient_name": ["patient", "name", "recipient", "client"],
+        "rama_number": ["rama", "affiliation", "insurance", "card", "member"],
+        "dispensing_date": ["dispensing", "date", "issue", "dispense"],
+        "practitioner_name": ["practitioner", "doctor", "provider", "prescriber"],
+        "medicine_name": ["medicine", "drug", "medication", "product"],
+        "medicine_cost": ["cost", "price", "amount", "fee", "total"],
+        "visit_date": ["visit", "date", "admission", "appointment"],
+    }
+    
+    target_keywords = keywords.get(target_field, [target_lower.split()])
+    
+    best_match = None
+    best_score = 0
+    
+    for col, col_name in zip(col_lower, available_columns):
+        score = sum(1 for kw in target_keywords if kw in col)
+        if score > best_score:
+            best_score = score
+            best_match = col_name
+    
+    return best_match, min(best_score * 25, 90) if best_score > 0 else 0
+
 def validate_and_transform(df, mapping, required_fields, data_type="pharmacy"):
     """
     Validate mapped columns, detect data types, and transform.
